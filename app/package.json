@@ -5,9 +5,7 @@
   "description": "Open-source swappable desktop pet (character packs first)",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "packer": "electron packer/main.js",
-    "pack:check": "node ../scripts/check-packs.js"
+    "start": "electron ."
   },
   "engines": {
     "node": ">=18"

@@ -1,2 +1,0 @@
-
-{"ok":true,"errors":[],"pointerWatch":true,"travel":{"y0":275.60418701171875,"y1":59.6348876953125,"color":"rgb(17, 17, 17)","shadow":"rgb(255, 255, 255) 0px -2px 0px, rgb(255, 255, 255) 0px 2px 0px, rgb(255, 255, 2","text":"按住久一点"},"hold":{"afterShort":{"log":["listen","short"],"hot":false},"atListen":{"log":["listen","short","listen"],"hot":true},"mid":{"log":["listen","short","listen"],"hot":true},"afterLong":{"log":["listen","short","listen","send"],"hot":false}}}

@@ -1,9 +1,0 @@
-
-{
-  "ok": true,
-  "out": "C:\\Users\\Administrator\\Projects\\desktop-pet-custom\\comfy\\verify\\packer_ui.png",
-  "title": "角色包出包",
-  "rows": 6,
-  "add": true,
-  "exp": true
-}

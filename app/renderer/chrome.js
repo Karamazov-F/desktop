@@ -1,5 +1,5 @@
 function winApi() {
-  return window.petApi || window.packerApi || {};
+  return window.petApi || {};
 }
 
 document.querySelectorAll("[data-win]").forEach((btn) => {

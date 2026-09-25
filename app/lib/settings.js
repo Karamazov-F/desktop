@@ -5,7 +5,7 @@ const { loadLocalSecrets } = require("./secrets");
 const hotkeys = require("./hotkeys");
 
 const defaultSettings = {
-  packId: "sample-human",
+  packId: "xiao-jing",
   alwaysOnTop: true,
   memoryEnabled: false,
   visionEnabled: false,

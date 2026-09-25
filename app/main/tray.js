@@ -76,7 +76,7 @@ function buildTray() {
   const icon = nativeImage.createFromPath(appFile("tray.png"));
   state.tray = new Tray(
     icon.isEmpty()
-      ? nativeImage.createFromPath(path.join(BUNDLED_PACKS, "blob", "sprites", "idle.png"))
+      ? nativeImage.createFromPath(path.join(BUNDLED_PACKS, "xiao-jing", "sprites", "idle_0.png"))
       : icon
   );
   state.tray.on("click", () => {

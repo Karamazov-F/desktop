@@ -8,7 +8,7 @@ const { extractArchive, findNamedFile, which, run, pythonBin } = require("./extr
  *
  * 新增依赖（后续功能一律走这里，不要另起检测/安装）：
  * 1. 在 `app/lib/deps/items/<id>.js` 导出 `module.exports = (api) => api.registerDep({...})`
- * 2. 启动页、托盘「环境依赖」、`node scripts/install-deps.js` 会自动扫到并支持一键安装
+ * 2. 启动页和托盘「环境依赖」会自动扫到并支持一键安装
  *
  * Item shape:
  *   id, title, detail, required, group,

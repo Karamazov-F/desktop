@@ -1,2 +1,0 @@
-
-{"ok":true,"empty":{"ready":false,"bg":"rgb(169, 203, 255)"},"spaces":{"ready":false,"bg":"rgb(169, 203, 255)"},"filled":{"ready":true,"bg":"rgb(169, 203, 255)"},"filledSettled":{"ready":true,"bg":"rgb(61, 139, 255)"}}

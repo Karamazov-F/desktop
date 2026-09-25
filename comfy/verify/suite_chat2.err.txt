@@ -1,1 +1,0 @@
-FAIL: hold-to-talk should pin the collapsed pill with a red mic {"alive":false,"hot":null,"expanded":null}

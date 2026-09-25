@@ -1,1 +1,0 @@
-FAIL: compose close/open pointer tests threw "Cannot read properties of null (reading 'isFocused')"
