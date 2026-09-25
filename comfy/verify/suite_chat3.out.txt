@@ -1,0 +1,31 @@
+
+{
+  "ok": true,
+  "menuLabels": [
+    "碎碎念",
+    "对话(双击角色可直接对话)",
+    "动作 ▸"
+  ],
+  "composeUi": {
+    "ph": "说点什么…",
+    "sendLabel": "发送",
+    "quickMic": "按住说话",
+    "fieldMic": "按住说话",
+    "openCompose": "输入消息",
+    "expanded": true,
+    "hint": ""
+  },
+  "composeFollowed": true,
+  "chatFollowed": false,
+  "bubble": {
+    "show": true,
+    "text": "主人今天想喝奶茶还是咖啡呀？甜一点的话加珍珠好不好？要是累了我给主人捏捏肩～不过太晚喝会睡不着哦。",
+    "w": 295.3333435058594,
+    "h": 88.33333587646484
+  },
+  "out": [
+    "C:\\Users\\Administrator\\Projects\\desktop-pet-custom\\comfy\\verify\\compose_l1.png",
+    "C:\\Users\\Administrator\\Projects\\desktop-pet-custom\\comfy\\verify\\compose_l2.png",
+    "C:\\Users\\Administrator\\Projects\\desktop-pet-custom\\comfy\\verify\\compose_l3.png"
+  ]
+}

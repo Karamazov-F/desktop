@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>聊天记录</title>
+    <link rel="stylesheet" href="./fonts.css" />
+    <link rel="stylesheet" href="./ui.css" />
+  </head>
+  <body class="page-chat">
+    <header class="titlebar">
+      <span class="titlebar-label">聊天记录</span>
+      <div class="titlebar-controls">
+        <button type="button" class="win-btn" data-win="min" title="最小化" aria-label="最小化"></button>
+        <button type="button" class="win-btn win-close" data-win="close" title="关闭" aria-label="关闭"></button>
+      </div>
+    </header>
+    <div id="wrap">
+      <div id="who">对话</div>
+      <div id="hint" class="hint">本地规则随时可用。</div>
+      <div id="log" class="chat"></div>
+      <div id="bar">
+        <button id="mic" type="button" title="按住说话">按住说话</button>
+        <input id="input" type="text" placeholder="输入" maxlength="500" />
+        <button id="send" type="button">发送</button>
+      </div>
+    </div>
+    <script src="./chrome.js"></script>
+    <script src="./hold-talk.js"></script>
+    <script src="./chat.js"></script>
+  </body>
+</html>

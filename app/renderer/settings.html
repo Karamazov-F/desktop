@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>设置</title>
+    <link rel="stylesheet" href="./fonts.css" />
+    <link rel="stylesheet" href="./ui.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <span class="titlebar-label">设置</span>
+      <div class="titlebar-controls">
+        <button type="button" class="win-btn" data-win="min" title="最小化" aria-label="最小化"></button>
+        <button type="button" class="win-btn win-close" data-win="close" title="关闭" aria-label="关闭"></button>
+      </div>
+    </header>
+    <main>
+      <h1>设置</h1>
+      <p class="hint">Key 只存在本机。文本模型不能看图；截屏走图像输入，且需手动打开。</p>
+
+      <section>
+        <h2>对话</h2>
+        <label class="toggle">
+          <input id="deepseekEnabled" type="checkbox" />
+          <i></i>
+          <span>DeepSeek 对话</span>
+        </label>
+        <label class="field">
+          API Key
+          <input id="deepseekApiKey" type="password" placeholder="sk-…" autocomplete="off" />
+        </label>
+        <p id="keyHint" class="hint"></p>
+        <label class="field">
+          接口
+          <input id="deepseekBaseUrl" type="text" />
+        </label>
+        <div class="field-row">
+          <label class="field">
+            文本模型
+            <input id="deepseekModel" type="text" />
+          </label>
+          <label class="field">
+            视觉模型
+            <input id="visionModel" type="text" />
+          </label>
+        </div>
+      </section>
+
+      <section>
+        <h2>窗口</h2>
+        <label class="toggle">
+          <input id="alwaysOnTop" type="checkbox" />
+          <i></i>
+          <span>始终置顶</span>
+        </label>
+        <label class="toggle">
+          <input id="lifeStream" type="checkbox" />
+          <i></i>
+          <span>自己过日子（暂时关闭：不自动切动作）</span>
+        </label>
+        <p class="hint">自动切动作先关掉，只循环待机；托盘/单击仍可手动播。左右走用同一套行走帧做水平翻转。</p>
+        <label class="toggle">
+          <input id="hideOnFullscreen" type="checkbox" />
+          <i></i>
+          <span>全屏时隐藏</span>
+        </label>
+      </section>
+
+      <section>
+        <h2>快捷键</h2>
+        <label class="field">
+          隐藏 / 显示
+          <div class="hotkey-row">
+            <input id="hideHotkey" class="hotkey" type="text" readonly placeholder="点击后按下组合键" />
+            <button type="button" id="clearHideHotkey">清除</button>
+          </div>
+        </label>
+        <label class="field">
+          开始 / 结束语音
+          <div class="hotkey-row">
+            <input id="voiceHotkey" class="hotkey" type="text" readonly placeholder="点击后按下组合键" />
+            <button type="button" id="clearVoiceHotkey">清除</button>
+          </div>
+        </label>
+        <p class="hint">全局生效。至少双键，如 Shift+~。两项不能相同。</p>
+      </section>
+
+      <section>
+        <h2>记忆</h2>
+        <label class="toggle">
+          <input id="memoryEnabled" type="checkbox" />
+          <i></i>
+          <span>长期记忆</span>
+        </label>
+        <label class="toggle">
+          <input id="visionEnabled" type="checkbox" />
+          <i></i>
+          <span>截屏感知</span>
+        </label>
+      </section>
+
+      <div class="actions">
+        <button type="button" class="primary" id="save">保存</button>
+        <button type="button" id="clearMem">清空记忆</button>
+        <button type="button" id="importDpet">导入 .dpet</button>
+        <button type="button" id="importFolder">导入文件夹</button>
+        <button type="button" id="deps">环境依赖</button>
+      </div>
+      <p id="status" class="status"></p>
+    </main>
+    <script src="../lib/hotkeys.js"></script>
+    <script src="./chrome.js"></script>
+    <script src="./settings.js"></script>
+  </body>
+</html>

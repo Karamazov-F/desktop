@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>桌宠出包工具</title>
+    <link rel="stylesheet" href="../renderer/fonts.css" />
+    <link rel="stylesheet" href="../renderer/ui.css" />
+    <style>
+      .pack-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+      }
+      .pack-table th,
+      .pack-table td {
+        text-align: left;
+        padding: 8px 6px;
+        border-bottom: 1px solid var(--line);
+        vertical-align: middle;
+      }
+      .pack-table th {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+      }
+      .pack-table input[type="text"] {
+        width: 100%;
+      }
+      .path {
+        font-size: 12px;
+        color: var(--muted);
+        max-width: 280px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      button.danger {
+        color: var(--bad);
+      }
+      #log {
+        margin-top: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="titlebar">
+      <span class="titlebar-label">出包</span>
+      <div class="titlebar-controls">
+        <button type="button" class="win-btn" data-win="min" title="最小化" aria-label="最小化"></button>
+        <button type="button" class="win-btn win-close" data-win="close" title="关闭" aria-label="关闭"></button>
+      </div>
+    </header>
+    <main>
+      <h1>角色包出包</h1>
+      <p class="hint">
+        与桌宠分开运行。每个动作一行名称 + 视频，必须有 idle。导出加密 <code>.dpet</code>，再在桌宠托盘导入。
+      </p>
+      <div class="field-row">
+        <label class="field">角色 id<input id="packId" type="text" value="my-pack" /></label>
+        <label class="field">显示名<input id="packName" type="text" value="我的角色" /></label>
+      </div>
+      <div class="field-row">
+        <label class="field">宽度<input id="width" type="number" value="256" min="32" /></label>
+        <label class="field">高度<input id="height" type="number" value="256" min="32" /></label>
+      </div>
+      <label class="field">作者<input id="author" type="text" value="" /></label>
+      <label class="toggle">
+        <input id="chroma" type="checkbox" />
+        <i></i>
+        <span>绿幕抠图</span>
+      </label>
+      <table class="pack-table">
+        <thead>
+          <tr>
+            <th style="width: 140px">动作名称</th>
+            <th>视频文件</th>
+            <th style="width: 168px"></th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="actions">
+        <button type="button" id="add">添加动作</button>
+        <button type="button" class="primary" id="export">导出加密包</button>
+      </div>
+      <div id="log">准备就绪。本工具不启动桌宠。</div>
+    </main>
+    <script src="../renderer/chrome.js"></script>
+    <script src="./ui.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "id": "blob",
+  "name": "水滴球",
+  "version": "0.1.0",
+  "author": "desktop-pet-custom",
+  "license": "CC0-1.0",
+  "size": { "width": 128, "height": 128 },
+  "states": {
+    "idle": "sprites/idle.png",
+    "blink": "sprites/blink.png",
+    "happy": "sprites/happy.png"
+  }
+}

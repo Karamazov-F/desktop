@@ -1,0 +1,21 @@
+{
+  "name": "desktop-pet-custom",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Open-source swappable desktop pet (character packs first)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "packer": "electron packer/main.js",
+    "pack:check": "node ../scripts/check-packs.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  },
+  "dependencies": {
+    "koffi": "^3.3.1"
+  }
+}

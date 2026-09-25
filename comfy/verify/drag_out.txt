@@ -1,0 +1,18 @@
+
+{
+  "ok": true,
+  "fedDelta": {
+    "dw": 25,
+    "dh": 0
+  },
+  "sizeDrift": 0,
+  "bubbleDrift": 0,
+  "bubbleBefore": {
+    "w": 292,
+    "h": 85
+  },
+  "bubbleAfter": {
+    "w": 292,
+    "h": 85
+  }
+}

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>menu</title>
+    <link rel="stylesheet" href="./fonts.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+        font: 14px/1.45 var(--pet-ui-font);
+      }
+      /* Nearly-opaque hit fill so transparent gaps don't pass mouse through
+         to the desktop (which blurs this window and kills the flyout). */
+      #wrap {
+        display: flex;
+        align-items: flex-start;
+        padding: 4px;
+        background: rgba(255, 255, 255, 0.025);
+      }
+      #menu,
+      #sub {
+        background: rgba(255, 250, 247, 0.98);
+        border: 1px solid rgba(107, 79, 102, 0.13);
+        border-radius: 16px;
+        box-shadow: 0 10px 28px rgba(52, 34, 49, 0.2), 0 2px 6px rgba(52, 34, 49, 0.08);
+        min-width: 148px;
+        padding: 6px;
+      }
+      #menu {
+        min-width: 226px;
+      }
+      #sub {
+        display: none;
+        /* Bridge strip: no empty transparent gap between panels. */
+        margin-left: 0;
+        padding-left: 6px;
+        background: transparent;
+        box-shadow: none;
+        border-radius: 0;
+      }
+      #sub.open {
+        display: block;
+      }
+      #sub-panel {
+        background: rgba(255, 250, 247, 0.98);
+        border: 1px solid rgba(107, 79, 102, 0.13);
+        border-radius: 16px;
+        box-shadow: 0 10px 28px rgba(52, 34, 49, 0.2), 0 2px 6px rgba(52, 34, 49, 0.08);
+        min-width: 120px;
+        padding: 6px;
+      }
+      button.item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        padding: 9px 11px;
+        border-radius: 10px;
+        font-family: var(--pet-ui-font);
+        font-weight: 400;
+        color: #403840;
+        cursor: pointer;
+      }
+      button.item:hover,
+      button.item.hot {
+        background: #f4e6e2;
+      }
+      .chev {
+        color: #bd8d80;
+        font-size: 12px;
+        margin-left: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <div id="menu">
+        <button type="button" class="item" data-kind="chatter">碎碎念</button>
+        <button type="button" class="item" data-kind="compose">
+          对话(双击角色可直接对话)
+        </button>
+        <button type="button" class="item" id="actions-btn" data-kind="actions">
+          动作 <span class="chev">▸</span>
+        </button>
+      </div>
+      <div id="sub"><div id="sub-panel"></div></div>
+    </div>
+    <script src="./pet-menu.js"></script>
+  </body>
+</html>

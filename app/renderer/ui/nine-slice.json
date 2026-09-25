@@ -1,0 +1,29 @@
+{
+  "dialog-9slice.png": {
+    "file": "dialog-9slice.png",
+    "radius": 16,
+    "slice": 19,
+    "patch": [
+      46,
+      46
+    ]
+  },
+  "btn-send-9slice.png": {
+    "file": "btn-send-9slice.png",
+    "radius": 31,
+    "slice": 34,
+    "patch": [
+      76,
+      76
+    ]
+  },
+  "btn-speak-9slice.png": {
+    "file": "btn-speak-9slice.png",
+    "radius": 32,
+    "slice": 35,
+    "patch": [
+      78,
+      78
+    ]
+  }
+}

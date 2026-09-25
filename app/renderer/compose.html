@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>compose</title>
+    <link rel="stylesheet" href="./fonts.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+        font-family: var(--pet-ui-font);
+      }
+      #card {
+        box-sizing: border-box;
+        position: relative;
+        width: 360px;
+        height: 68px;
+        padding: 8px 14px;
+        -webkit-app-region: no-drag;
+      }
+      #quick-actions {
+        position: absolute;
+        top: 8px;
+        left: calc(var(--dock-x, 180px) - 43px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: max-content;
+        margin: 0;
+        padding: 7px 8px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 5px 14px rgba(62, 43, 57, 0.12);
+        transform-origin: center top;
+        animation: dock-in 0.18s cubic-bezier(0.2, 0.9, 0.2, 1) both;
+        transition: opacity 0.16s ease, transform 0.18s cubic-bezier(0.2, 0.9, 0.2, 1);
+      }
+      .quick-btn {
+        display: grid;
+        place-items: center;
+        width: 36px;
+        height: 36px;
+        border: 0;
+        border-radius: 50%;
+        padding: 0;
+        background: transparent;
+        color: #25212a;
+        cursor: pointer;
+      }
+      .quick-btn + .quick-btn { border-left: 1px solid rgba(43, 35, 44, 0.08); }
+      .quick-btn:hover { background: #f6eeeb; }
+      .quick-btn.hot { background: #ee6c6c; color: white; box-shadow: 0 0 0 4px rgba(238, 108, 108, 0.2); }
+      .quick-btn:active { transform: scale(0.92); }
+      .quick-icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+      #hint {
+        display: none;
+        min-height: 16px;
+        margin: 0 12px 4px;
+        color: #5c5c64;
+        font-size: 12px;
+        font-weight: 400;
+        letter-spacing: 0.04em;
+      }
+      #hint:empty {
+        min-height: 0;
+        margin-bottom: 0;
+      }
+      /* scale9: 四角等比，只拉中间。边宽四边相等，禁止 10px 16px 这种把圆角拉成椭圆。 */
+      #field {
+        position: relative;
+        box-sizing: border-box;
+        height: 52px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.98);
+        box-shadow: 0 5px 15px rgba(74, 48, 66, 0.12);
+      }
+      #field-mic {
+        position: absolute;
+        left: 8px;
+        top: 6px;
+        z-index: 2;
+        display: grid;
+        place-items: center;
+        box-sizing: border-box;
+        width: 40px;
+        height: 40px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: #f3f3f4;
+        color: #36313a;
+        cursor: pointer;
+        transition: background 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+      }
+      #field-mic:hover { background: #ece7ea; }
+      #field-mic.hot { background: #ee6c6c; color: #fff; box-shadow: 0 0 0 4px rgba(238, 108, 108, 0.2); }
+      #input {
+        position: relative;
+        z-index: 1;
+        display: block;
+        box-sizing: border-box;
+        width: 100%;
+        height: 52px;
+        margin: 0;
+        border: 0;
+        padding: 0 62px 0 58px;
+        background: transparent;
+        color: #1c1c1c;
+        font-family: var(--pet-ui-font);
+        font-size: 15px;
+        font-weight: 400;
+        letter-spacing: 0.02em;
+        outline: none;
+        line-height: 52px;
+      }
+      #input::placeholder {
+        color: #c5c4ca;
+      }
+      #btns {
+        position: absolute;
+        top: 5px;
+        right: 8px;
+      }
+      .btn {
+        position: relative;
+        z-index: 0;
+        box-sizing: border-box;
+        width: 42px;
+        height: 40px;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: #a9cbff;
+        font-family: var(--pet-ui-font);
+        font-size: 0;
+        font-weight: 400;
+        letter-spacing: 0.06em;
+        color: #1a1a1a;
+        cursor: pointer;
+        line-height: 40px;
+        transition: transform 0.14s ease, filter 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+      }
+      .btn.ready {
+        background: #3d8bff;
+        box-shadow: 0 0 0 3px rgba(61, 139, 255, 0.34), 0 4px 10px rgba(47, 120, 240, 0.38);
+      }
+      .btn::before {
+        content: "↑";
+        position: absolute;
+        inset: 0;
+        color: white;
+        font: 28px/38px sans-serif;
+      }
+      .btn:active {
+        transform: translateY(1px) scale(0.98);
+        filter: brightness(0.96);
+      }
+      #compose-panel { position: absolute; top: 8px; left: 0; width: 100%; opacity: 0; pointer-events: none; transform: scaleX(0.24); transform-origin: var(--dock-x, 180px) center; transition: opacity 0.12s ease, transform 0.2s cubic-bezier(0.2, 0.9, 0.2, 1); }
+      body.expanded #quick-actions { opacity: 0; pointer-events: none; transform: scaleX(0.35); }
+      body.expanded #compose-panel { opacity: 1; pointer-events: auto; transform: scaleX(1); }
+      @keyframes dock-in { from { opacity: 0; transform: translateY(-10px) scale(0.65); } to { opacity: 1; transform: translateY(0) scale(1); } }
+      @media (prefers-reduced-motion: reduce) {
+        .btn, .quick-btn { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="card">
+      <div id="quick-actions" aria-label="对话操作">
+        <button id="open-compose" class="quick-btn" type="button" title="输入消息" aria-label="输入消息">
+          <svg class="quick-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20H5a1 1 0 0 1-1-1v-7"/><path d="m15.5 4.5 4 4"/><path d="M8 16 19.4 4.6a1.4 1.4 0 0 1 2 2L10 18l-3 1z"/></svg>
+        </button>
+        <button id="quick-mic" class="quick-btn" type="button" title="按住说话" aria-label="按住说话">
+          <svg class="quick-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6"/><path d="M10 5v14"/><path d="M15 8v8"/><path d="M20 4v16"/></svg>
+        </button>
+      </div>
+      <div id="compose-panel">
+        <div id="hint" aria-live="polite"></div>
+        <div id="field">
+          <button id="field-mic" type="button" title="按住说话" aria-label="按住说话">
+            <svg class="quick-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9v6"/><path d="M10 5v14"/><path d="M15 8v8"/><path d="M20 4v16"/></svg>
+          </button>
+          <input id="input" type="text" maxlength="500" placeholder="说点什么…" />
+        </div>
+        <div id="btns"><button type="button" id="send" class="btn send" aria-label="发送"></button></div>
+      </div>
+    </div>
+    <script src="./hold-talk.js"></script>
+    <script src="./compose.js"></script>
+  </body>
+</html>

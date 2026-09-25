@@ -1,0 +1,28 @@
+/* 乐米石朗体 Regular v1.000 — 杭州乐米网络科技有限公司，版权所有 */
+@font-face {
+  font-family: "乐米石朗体";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/LemiShiLangTi.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "乐米石朗体";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/LemiShiLangTi.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "乐米石朗体";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/LemiShiLangTi.woff2") format("woff2");
+}
+
+:root {
+  --pet-ui-font: "乐米石朗体", "Microsoft YaHei UI", sans-serif;
+}

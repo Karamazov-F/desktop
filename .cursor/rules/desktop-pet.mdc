@@ -1,0 +1,23 @@
+---
+description: desktop-pet-custom 执行规则
+alwaysApply: true
+---
+
+# desktop-pet-custom
+
+按 `BRIEF.md` / 总控 `studio/briefs/desktop-pet-custom.md` 执行。
+
+## 主叙事
+
+开源可换角桌宠 + 关注账号发角色包。截屏记忆 / DeepSeek 文本为可选加分，不是唯一卖点。
+
+## 硬约束
+
+- 用户不依赖 Cursor / MCP
+- DeepSeek API 只当文本；勿宣传其官方 API 能看图
+- 不做大众向角色包制作器（制作留作者侧）
+- 不做侵权官发脸包
+
+## P0 优先
+
+换角跑通 > 精美 AI 陪聊

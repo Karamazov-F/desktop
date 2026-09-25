@@ -1,0 +1,124 @@
+const $ = (id) => document.getElementById(id);
+const HK = window.PetHotkeys;
+if (!HK) throw new Error("PetHotkeys missing — check hotkeys.js script tag");
+
+function accelOf(el) {
+  return el.dataset.accel || "";
+}
+
+function showHotkey(el, raw) {
+  const n = HK.normalize(raw);
+  el.dataset.accel = n;
+  el.value = n ? HK.formatDisplay(n) : "";
+  el.placeholder = n ? HK.formatDisplay(n) : "点击后按下组合键（可清除）";
+}
+
+function fill(s) {
+  $("deepseekEnabled").checked = Boolean(s.deepseekEnabled);
+  $("memoryEnabled").checked = Boolean(s.memoryEnabled);
+  $("visionEnabled").checked = Boolean(s.visionEnabled);
+  $("alwaysOnTop").checked = Boolean(s.alwaysOnTop);
+  $("lifeStream").checked = s.lifeStream === true;
+  $("hideOnFullscreen").checked = s.hideOnFullscreen !== false;
+  $("deepseekBaseUrl").value = s.deepseekBaseUrl || "https://api.deepseek.com";
+  $("deepseekModel").value = s.deepseekModel || "deepseek-flash";
+  $("visionModel").value = s.visionModel || "deepseek-flash";
+  if (!document.activeElement || !document.activeElement.classList.contains("hotkey")) {
+    showHotkey($("hideHotkey"), s.hideHotkey);
+    showHotkey($("voiceHotkey"), s.voiceHotkey);
+  }
+  $("keyHint").textContent = s.hasDeepseekKey
+    ? `已保存 Key：${s.deepseekApiKeyMasked}`
+    : "尚未保存 Key。也可把 Key 放在仓库根目录 secrets.local.json（不会进 git）。";
+}
+
+function bindCapture(el) {
+  el.addEventListener("focus", () => {
+    el.classList.add("recording");
+    el.placeholder = "按下组合键… Esc 取消";
+  });
+  el.addEventListener("blur", () => {
+    el.classList.remove("recording");
+    el.placeholder = accelOf(el) ? HK.formatDisplay(accelOf(el)) : "点击后按下组合键（可清除）";
+  });
+  el.addEventListener("keydown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      el.blur();
+      return;
+    }
+    if (e.key === "Backspace" || e.key === "Delete") {
+      showHotkey(el, "");
+      return;
+    }
+    const accel = HK.fromKeyboardEvent({
+      code: e.code,
+      key: e.key,
+      ctrlKey: e.ctrlKey,
+      metaKey: e.metaKey,
+      altKey: e.altKey,
+      shiftKey: e.shiftKey,
+    });
+    if (!accel) return;
+    showHotkey(el, accel);
+    el.blur();
+  });
+}
+
+async function init() {
+  fill(await window.petApi.getSettings());
+  window.petApi.onSettingsChanged?.((s) => fill(s));
+}
+
+bindCapture($("hideHotkey"));
+bindCapture($("voiceHotkey"));
+$("clearHideHotkey").addEventListener("click", () => showHotkey($("hideHotkey"), ""));
+$("clearVoiceHotkey").addEventListener("click", () => showHotkey($("voiceHotkey"), ""));
+
+$("save").addEventListener("click", async () => {
+  const hideHotkey = accelOf($("hideHotkey"));
+  const voiceHotkey = accelOf($("voiceHotkey"));
+  if (hideHotkey && voiceHotkey && hideHotkey === voiceHotkey) {
+    $("status").textContent = "隐藏和语音不能用同一组快捷键。";
+    return;
+  }
+  const partial = {
+    deepseekEnabled: $("deepseekEnabled").checked,
+    memoryEnabled: $("memoryEnabled").checked,
+    visionEnabled: $("visionEnabled").checked,
+    alwaysOnTop: $("alwaysOnTop").checked,
+    lifeStream: $("lifeStream").checked,
+    hideOnFullscreen: $("hideOnFullscreen").checked,
+    deepseekBaseUrl: $("deepseekBaseUrl").value.trim(),
+    deepseekModel: $("deepseekModel").value.trim(),
+    visionModel: $("visionModel").value.trim(),
+    hideHotkey,
+    voiceHotkey,
+  };
+  const key = $("deepseekApiKey").value.trim();
+  if (key) partial.deepseekApiKey = key;
+  const next = await window.petApi.saveSettings(partial);
+  $("deepseekApiKey").value = "";
+  fill(next);
+  const bind = next.hotkeyBind || {};
+  const failed = [];
+  if (voiceHotkey && bind.voice === false) failed.push("语音");
+  if (hideHotkey && bind.hide === false) failed.push("隐藏/显示");
+  $("status").textContent = failed.length
+    ? `已保存，但${failed.join("、")}快捷键注册失败（可能被系统或其他软件占用）。`
+    : "已保存。快捷键立即生效。";
+});
+
+$("clearMem").addEventListener("click", async () => {
+  await window.petApi.clearMemory();
+  $("status").textContent = "当前角色记忆已清空。";
+});
+
+$("importDpet").addEventListener("click", () => window.petApi.importPack());
+$("importFolder").addEventListener("click", () => window.petApi.importPackFolder());
+$("deps").addEventListener("click", () => window.petApi.openDeps());
+
+init().catch((err) => {
+  $("status").textContent = String(err.message || err);
+});

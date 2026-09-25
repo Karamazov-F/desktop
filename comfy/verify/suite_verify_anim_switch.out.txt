@@ -1,0 +1,45 @@
+
+{
+  "ok": true,
+  "actions": [
+    "meow",
+    "walk"
+  ],
+  "samples": [
+    {
+      "currentStateName": "walk",
+      "frontIsA": false,
+      "aShow": false,
+      "bShow": true,
+      "covered": true,
+      "token": 34
+    },
+    {
+      "aShow": false,
+      "bShow": true,
+      "aOp": "0",
+      "bOp": "1",
+      "state": "walk"
+    },
+    {
+      "currentStateName": "walk",
+      "frontIsA": false,
+      "aShow": false,
+      "bShow": true,
+      "covered": true,
+      "token": 66
+    },
+    {
+      "aShow": false,
+      "bShow": true,
+      "aOp": "0",
+      "bOp": "1",
+      "state": "walk"
+    }
+  ],
+  "idle": {
+    "aShow": true,
+    "bShow": false,
+    "state": "idle"
+  }
+}

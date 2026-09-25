@@ -1,0 +1,31 @@
+
+captured pet_idle.png 81253
+captured pet_bubble.png 99209
+
+captured pet_menu.png 39746
+
+captured compose_pill.png 7431
+captured compose.png 11632
+
+captured chat_history.png 142474
+
+captured settings.png 201888
+
+captured setup_deps.png 237328
+
+captured packer.png 288763
+{
+  "ok": true,
+  "dir": "C:\\Users\\Administrator\\Projects\\desktop-pet-custom\\docs\\features\\img",
+  "files": [
+    "pet_idle.png",
+    "pet_bubble.png",
+    "pet_menu.png",
+    "compose_pill.png",
+    "compose.png",
+    "chat_history.png",
+    "settings.png",
+    "setup_deps.png",
+    "packer.png"
+  ]
+}

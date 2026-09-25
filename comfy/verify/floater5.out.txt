@@ -1,0 +1,2 @@
+
+{"ok":true,"errors":[],"pointerWatch":true,"travel":{"y0":178.80209350585938,"yArrived":158.80209350585938,"yHold":158.80209350585938,"color":"rgb(17, 17, 17)","shadow":"rgb(255, 255, 255) 0px -2px 0px, rgb(255, 255, 255) 0px 2px 0px, rgb(255, 255, 2","text":"按键时间过短"},"hold":{"afterShort":{"log":["listen","short"],"hot":false},"atListen":{"log":["listen","short","listen"],"hot":true},"mid":{"log":["listen","short","listen"],"hot":true},"afterLong":{"log":["listen","short","listen","send"],"hot":false}}}

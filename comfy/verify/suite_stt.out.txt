@@ -1,0 +1,7 @@
+
+{
+  "ok": true,
+  "text": "THE TRIVBAL CHIEF THIN CALLED FOR THE BOY AND PRESENTED HIM WITH FIFTY PIECES OF COOD",
+  "ms": 1605,
+  "engine": "sherpa-onnx/sensevoice-small"
+}

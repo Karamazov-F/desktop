@@ -1,0 +1,16 @@
+
+{
+  "ok": false,
+  "originX": 1280,
+  "midX": 1280,
+  "laterX": 1280,
+  "endX": 1280,
+  "dx": 0,
+  "midState": "walk",
+  "endState": "walk",
+  "facing": "left",
+  "walkMotion": true,
+  "distanceOk": false,
+  "srcA": "file:///C:/Users/Administrator/Projects/desktop-pet-custom/packs/xiao-jing/sprites/walk_0.png",
+  "srcB": "file:///C:/Users/Administrator/Projects/desktop-pet-custom/packs/xiao-jing/sprites/walk_1.png"
+}

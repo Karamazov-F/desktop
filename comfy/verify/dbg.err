@@ -1,0 +1,16 @@
+App threw an error during load
+C:\Users\Administrator\Projects\desktop-pet-custom\app\main.js:195
+}
+^
+
+SyntaxError: Unexpected token '}'
+    at wrapSafe (node:internal/modules/cjs/loader:1385:20)
+    at Module._compile (node:internal/modules/cjs/loader:1435:41)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1564:10)
+    at Module.load (node:internal/modules/cjs/loader:1295:32)
+    at Module._load (node:internal/modules/cjs/loader:1111:12)
+    at c._load (node:electron/js2c/node_init:2:16955)
+    at cjsLoader (node:internal/modules/esm/translators:350:17)
+    at ModuleWrap.<anonymous> (node:internal/modules/esm/translators:286:7)
+    at ModuleJob.run (node:internal/modules/esm/module_job:234:25)
+    at async ModuleLoader.import (node:internal/modules/esm/loader:473:24)

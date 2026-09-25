@@ -1,0 +1,277 @@
+{
+  "11": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    }
+  },
+  "16": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "chibi anime girl, brown twin tails, red ribbon, white shirt, navy overall dress, black socks, brown shoes, full body, standing on green screen, waving hello with one hand, cute motion, locked camera, static background, same character, solid green background",
+      "clip": [
+        "11",
+        0
+      ]
+    }
+  },
+  "17": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "text": "camera move, zoom, pan, text, watermark, multiple characters, character sheet, blurry, lowres, distorted face, extra fingers, morphing clothes, different outfit",
+      "clip": [
+        "11",
+        0
+      ]
+    }
+  },
+  "18": {
+    "class_type": "WanVideoTextEmbedBridge",
+    "inputs": {
+      "positive": [
+        "16",
+        0
+      ],
+      "negative": [
+        "17",
+        0
+      ]
+    }
+  },
+  "38": {
+    "class_type": "WanVideoVAELoader",
+    "inputs": {
+      "model_name": "wan_2.1_vae.safetensors",
+      "precision": "bf16"
+    }
+  },
+  "56": {
+    "class_type": "WanVideoLoraSelect",
+    "inputs": {
+      "lora": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+      "strength": 1.0,
+      "low_mem_load": false,
+      "merge_loras": false
+    }
+  },
+  "97": {
+    "class_type": "WanVideoLoraSelect",
+    "inputs": {
+      "lora": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+      "strength": 1.0,
+      "low_mem_load": false,
+      "merge_loras": false
+    }
+  },
+  "22": {
+    "class_type": "WanVideoModelLoader",
+    "inputs": {
+      "model": "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors",
+      "base_precision": "bf16",
+      "quantization": "fp8_e4m3fn_scaled",
+      "load_device": "offload_device",
+      "attention_mode": "sdpa"
+    }
+  },
+  "71": {
+    "class_type": "WanVideoModelLoader",
+    "inputs": {
+      "model": "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors",
+      "base_precision": "bf16",
+      "quantization": "fp8_e4m3fn_scaled",
+      "load_device": "offload_device",
+      "attention_mode": "sdpa"
+    }
+  },
+  "39": {
+    "class_type": "WanVideoBlockSwap",
+    "inputs": {
+      "blocks_to_swap": 25,
+      "offload_img_emb": false,
+      "offload_txt_emb": false,
+      "use_non_blocking": false,
+      "vace_blocks_to_swap": 0
+    }
+  },
+  "79": {
+    "class_type": "WanVideoSetLoRAs",
+    "inputs": {
+      "model": [
+        "22",
+        0
+      ],
+      "lora": [
+        "56",
+        0
+      ]
+    }
+  },
+  "80": {
+    "class_type": "WanVideoSetLoRAs",
+    "inputs": {
+      "model": [
+        "71",
+        0
+      ],
+      "lora": [
+        "97",
+        0
+      ]
+    }
+  },
+  "92": {
+    "class_type": "WanVideoSetBlockSwap",
+    "inputs": {
+      "model": [
+        "79",
+        0
+      ],
+      "block_swap_args": [
+        "39",
+        0
+      ]
+    }
+  },
+  "93": {
+    "class_type": "WanVideoSetBlockSwap",
+    "inputs": {
+      "model": [
+        "80",
+        0
+      ],
+      "block_swap_args": [
+        "39",
+        0
+      ]
+    }
+  },
+  "67": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "pet_pipeline/ref/ref_idle.png"
+    }
+  },
+  "89": {
+    "class_type": "WanVideoImageToVideoEncode",
+    "inputs": {
+      "vae": [
+        "38",
+        0
+      ],
+      "width": 512,
+      "height": 512,
+      "num_frames": 49,
+      "noise_aug_strength": 0.02,
+      "start_latent_strength": 1.0,
+      "end_latent_strength": 1.0,
+      "force_offload": true,
+      "start_image": [
+        "67",
+        0
+      ],
+      "end_image": [
+        "67",
+        0
+      ],
+      "fun_or_fl2v_model": true
+    }
+  },
+  "27": {
+    "class_type": "WanVideoSampler",
+    "inputs": {
+      "model": [
+        "92",
+        0
+      ],
+      "image_embeds": [
+        "89",
+        0
+      ],
+      "steps": 4,
+      "cfg": 1.0,
+      "shift": 5.0,
+      "seed": 42,
+      "force_offload": true,
+      "scheduler": "dpm++_sde",
+      "riflex_freq_index": 0,
+      "text_embeds": [
+        "18",
+        0
+      ],
+      "denoise_strength": 1.0,
+      "rope_function": "comfy",
+      "start_step": 0,
+      "end_step": 2,
+      "add_noise_to_samples": false
+    }
+  },
+  "90": {
+    "class_type": "WanVideoSampler",
+    "inputs": {
+      "model": [
+        "93",
+        0
+      ],
+      "image_embeds": [
+        "89",
+        0
+      ],
+      "steps": 4,
+      "cfg": 1.0,
+      "shift": 5.0,
+      "seed": 42,
+      "force_offload": true,
+      "scheduler": "dpm++_sde",
+      "riflex_freq_index": 0,
+      "text_embeds": [
+        "18",
+        0
+      ],
+      "samples": [
+        "27",
+        0
+      ],
+      "denoise_strength": 1.0,
+      "rope_function": "comfy",
+      "start_step": 2,
+      "end_step": -1,
+      "add_noise_to_samples": false
+    }
+  },
+  "28": {
+    "class_type": "WanVideoDecode",
+    "inputs": {
+      "vae": [
+        "38",
+        0
+      ],
+      "samples": [
+        "90",
+        0
+      ],
+      "enable_vae_tiling": false,
+      "tile_x": 272,
+      "tile_y": 272,
+      "tile_stride_x": 144,
+      "tile_stride_y": 128,
+      "normalization": "default"
+    }
+  },
+  "60": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": [
+        "28",
+        0
+      ],
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "pet_pipeline/video/wave",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}
