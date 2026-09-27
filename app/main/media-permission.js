@@ -1,7 +1,7 @@
 const path = require("path");
 
 function pathApi(platform) {
-  return platform === "win32" ? path.win32 : path;
+  return platform === "win32" ? path.win32 : path.posix;
 }
 
 function filePathFromUrl(requestingUrl, platform = process.platform) {

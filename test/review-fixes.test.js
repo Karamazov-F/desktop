@@ -591,17 +591,10 @@ test("rejected marker is only for permanent pack failures", () => {
   assert.throws(() => packs.readDpetPack(bad, cache), /不是有效的角色包文件/);
   assert.equal(fs.existsSync(path.join(cache, packs.cacheKeyForDpet(bad)) + ".rejected"), true);
 
-  const src = path.join(parent, "src");
-  packFixture(src, "ok-pack");
-  const archive = path.join(parent, "ok.dpet");
-  dpet.encryptDir(src, archive);
-  fs.chmodSync(archive, 0);
-  try {
-    assert.throws(() => packs.readDpetPack(archive, cache));
-  } finally {
-    fs.chmodSync(archive, 0o644);
-  }
-  assert.equal(fs.existsSync(path.join(cache, packs.cacheKeyForDpet(archive)) + ".rejected"), false);
+  const locked = path.join(parent, "locked.dpet");
+  fs.mkdirSync(locked);
+  assert.throws(() => packs.readDpetPack(locked, cache));
+  assert.equal(fs.existsSync(path.join(cache, packs.cacheKeyForDpet(locked)) + ".rejected"), false);
 });
 
 test("startup clears leftover import and unpack directories", () => {
