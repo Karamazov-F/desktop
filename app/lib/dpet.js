@@ -27,6 +27,10 @@ const MAGIC = Buffer.from("DPET");
 const PAYLOAD_MAGIC = Buffer.from("DP01");
 const VERSION = 1;
 const INFO = Buffer.from("dpet-v1");
+const MAX_ENTRIES = 10000;
+const MAX_FILE_BYTES = 64 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
+const COMPLETE_MARKER = ".dpet-complete";
 
 function wrapKey() {
   return crypto.createHash("sha256").update("desktop-pet-custom.dpet.v1").digest();
@@ -67,25 +71,45 @@ function encodePayload(files) {
   return Buffer.concat(parts);
 }
 
+function need(buf, off, len) {
+  if (!Number.isInteger(len) || len < 0 || off < 0 || off + len > buf.length) {
+    throw new Error("角色包内容无效");
+  }
+}
+
 function decodePayload(buf) {
   if (buf.length < 8 || buf.subarray(0, 4).toString("binary") !== PAYLOAD_MAGIC.toString("binary")) {
     throw new Error("invalid dpet payload");
   }
   const count = buf.readUInt32LE(4);
+  if (count > MAX_ENTRIES) throw new Error("角色包文件过多，已拒绝导入");
   let off = 8;
+  let total = 0;
   const files = [];
   for (let i = 0; i < count; i++) {
+    need(buf, off, 2);
     const nameLen = buf.readUInt16LE(off);
     off += 2;
+    if (nameLen > 512) throw new Error("角色包包含非法路径，已拒绝导入");
+    need(buf, off, nameLen);
     const rel = buf.subarray(off, off + nameLen).toString("utf8");
     off += nameLen;
+    need(buf, off, 4);
     const dataLen = buf.readUInt32LE(off);
     off += 4;
-    const data = buf.subarray(off, off + dataLen);
+    if (dataLen > MAX_FILE_BYTES) throw new Error("角色包内文件过大，已拒绝导入");
+    total += dataLen;
+    if (total > MAX_OUTPUT_BYTES) throw new Error("角色包过大，已拒绝导入");
+    need(buf, off, dataLen);
+    const data = Buffer.from(buf.subarray(off, off + dataLen));
     off += dataLen;
     files.push({ rel, data });
   }
   return files;
+}
+
+function gunzipLimited(gz, maxOutputLength = MAX_OUTPUT_BYTES) {
+  return zlib.gunzipSync(gz, { maxOutputLength });
 }
 
 function encryptFiles(files, destPath, meta = {}) {
@@ -163,21 +187,34 @@ function parseArchive(buf) {
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
   decipher.setAuthTag(tag);
   const gz = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  const payload = zlib.gunzipSync(gz);
+  const payload = gunzipLimited(gz);
   const files = decodePayload(payload);
   return { header, files };
 }
 
 function decryptToDir(srcPath, destDir) {
   const parsed = parseArchive(fs.readFileSync(srcPath));
-  const writes = [];
-  for (const f of parsed.files) {
-    writes.push({ abs: resolveInside(destDir, f.rel), data: f.data });
-  }
-  fs.mkdirSync(destDir, { recursive: true });
-  for (const file of writes) {
-    fs.mkdirSync(path.dirname(file.abs), { recursive: true });
-    fs.writeFileSync(file.abs, file.data);
+  const parent = path.dirname(path.resolve(destDir));
+  fs.mkdirSync(parent, { recursive: true });
+  const tmp = fs.mkdtempSync(path.join(parent, ".unpack-"));
+  try {
+    const writes = [];
+    for (const f of parsed.files) {
+      writes.push({ abs: resolveInside(tmp, f.rel), data: f.data });
+    }
+    for (const file of writes) {
+      fs.mkdirSync(path.dirname(file.abs), { recursive: true });
+      fs.writeFileSync(file.abs, file.data);
+    }
+    if (!fs.existsSync(path.join(tmp, "pack.json"))) {
+      throw new Error("角色包无效");
+    }
+    fs.writeFileSync(path.join(tmp, COMPLETE_MARKER), "1");
+    fs.rmSync(destDir, { recursive: true, force: true });
+    fs.renameSync(tmp, destDir);
+  } catch (err) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw err;
   }
   return { dir: destDir, header: parsed.header };
 }
@@ -191,6 +228,12 @@ module.exports = {
   encryptFiles,
   decryptToDir,
   parseArchive,
+  decodePayload,
+  gunzipLimited,
   isDpetFile,
   collectFiles,
+  MAX_ENTRIES,
+  MAX_FILE_BYTES,
+  MAX_OUTPUT_BYTES,
+  COMPLETE_MARKER,
 };

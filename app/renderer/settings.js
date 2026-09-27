@@ -20,16 +20,19 @@ function fill(s) {
   $("alwaysOnTop").checked = Boolean(s.alwaysOnTop);
   $("lifeStream").checked = s.lifeStream === true;
   $("hideOnFullscreen").checked = s.hideOnFullscreen !== false;
-  $("deepseekBaseUrl").value = s.deepseekBaseUrl || "https://api.deepseek.com";
   $("deepseekModel").value = s.deepseekModel || "deepseek-flash";
   $("visionModel").value = s.visionModel || "deepseek-flash";
   if (!document.activeElement || !document.activeElement.classList.contains("hotkey")) {
     showHotkey($("hideHotkey"), s.hideHotkey);
     showHotkey($("voiceHotkey"), s.voiceHotkey);
   }
-  $("keyHint").textContent = s.hasDeepseekKey
-    ? `已保存 Key：${s.deepseekApiKeyMasked}（系统加密，不明文存放）`
-    : "尚未保存 Key。Key 会用系统加密保存在本机。";
+  if (s.keyUnreadable) {
+    $("keyHint").textContent = "已保存的 Key 暂时无法读取。可以清除后重新填写。";
+  } else if (s.hasDeepseekKey) {
+    $("keyHint").textContent = `已保存 Key：${s.deepseekApiKeyMasked}（系统加密，不明文存放）`;
+  } else {
+    $("keyHint").textContent = "尚未保存 Key。Key 会用系统加密保存在本机。";
+  }
 }
 
 function bindCapture(el) {
@@ -90,7 +93,6 @@ $("save").addEventListener("click", async () => {
     alwaysOnTop: $("alwaysOnTop").checked,
     lifeStream: $("lifeStream").checked,
     hideOnFullscreen: $("hideOnFullscreen").checked,
-    deepseekBaseUrl: $("deepseekBaseUrl").value.trim(),
     deepseekModel: $("deepseekModel").value.trim(),
     visionModel: $("visionModel").value.trim(),
     hideHotkey,
@@ -114,6 +116,20 @@ $("save").addEventListener("click", async () => {
   $("status").textContent = failed.length
     ? `已保存，但${failed.join("、")}快捷键注册失败（可能被系统或其他软件占用）。`
     : "已保存。快捷键立即生效。";
+});
+
+$("clearApiKey").addEventListener("click", async () => {
+  if (!window.confirm("清除已保存的 API Key？")) return;
+  let next;
+  try {
+    next = await window.petApi.saveSettings({ deepseekApiKey: null });
+  } catch (err) {
+    $("status").textContent = String(err.message || err);
+    return;
+  }
+  $("deepseekApiKey").value = "";
+  fill(next);
+  $("status").textContent = "已清除 API Key。";
 });
 
 $("clearAll").addEventListener("click", async () => {

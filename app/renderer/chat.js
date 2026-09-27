@@ -38,7 +38,7 @@ function applyHint(settings) {
     .replace(/\+/g, "+");
   hintEl.textContent =
     bits.join(" · ") +
-    `。打字回车发送；按住说话超过一秒，或 ${voiceLabel} 语音（关对话窗也能说）。`;
+    `。打字回车发送；按住说话超过半秒，或 ${voiceLabel} 语音（关对话窗也能说）。`;
   if (inputEl) {
     inputEl.placeholder = voiceLabel
       ? `打字，或按 ${voiceLabel} 说话`

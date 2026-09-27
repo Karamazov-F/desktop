@@ -71,6 +71,10 @@ function clearSessions() {
   sessions.clear();
 }
 
+function visionIsOn(settings, allowVision = true) {
+  return Boolean(settings?.visionEnabled && allowVision);
+}
+
 async function runAgentTurn({
   pack,
   settings,
@@ -81,6 +85,7 @@ async function runAgentTurn({
   applyMove,
   allowVision = true,
   notifyCapture,
+  signal,
 }) {
   const displayName = pack.persona?.displayName || pack.name || "桌宠";
   const local = localFallback(pack, userText);
@@ -98,7 +103,7 @@ async function runAgentTurn({
     };
   }
 
-  const visionOn = Boolean(settings.visionEnabled && allowVision);
+  const visionOn = visionIsOn(settings, allowVision);
   const effective = { ...settings, visionEnabled: visionOn };
   const mem = settings.memoryEnabled
     ? memory.loadMemory(userData, pack.id)
@@ -110,6 +115,13 @@ async function runAgentTurn({
     actions,
   });
   const allowed = allowedToolNames(effective);
+  const turn = new AbortController();
+  const onParentAbort = () => turn.abort();
+  if (signal) {
+    if (signal.aborted) turn.abort();
+    else signal.addEventListener("abort", onParentAbort);
+  }
+  const kill = setTimeout(() => turn.abort(), MAX_TURN_MS);
   const started = Date.now();
   const messages = [
     { role: "system", content: buildSystemPrompt(pack, effective, mem) },
@@ -126,7 +138,7 @@ async function runAgentTurn({
 
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      if (Date.now() - started > MAX_TURN_MS) {
+      if (turn.signal.aborted || Date.now() - started > MAX_TURN_MS) {
         throw new Error("思考时间过长");
       }
       const result = await chatCompletionsRetry({
@@ -138,6 +150,7 @@ async function runAgentTurn({
         temperature: 0.8,
         maxTokens: 400,
         thinking: "disabled",
+        signal: turn.signal,
       });
 
       if (result.tool_calls && result.tool_calls.length) {
@@ -187,6 +200,7 @@ async function runAgentTurn({
                   model: settings.visionModel || settings.deepseekModel || "deepseek-flash",
                   jpegBuffer: jpeg,
                   extraHint: userText,
+                  signal: turn.signal,
                 });
                 usedVision = true;
                 toolResult = desc || "看不太清";
@@ -222,6 +236,9 @@ async function runAgentTurn({
       error: String(err.message || err).slice(0, 240),
       displayName,
     };
+  } finally {
+    clearTimeout(kill);
+    if (signal) signal.removeEventListener("abort", onParentAbort);
   }
 
   if (!lastText) lastText = local.text || "嗯。";
@@ -265,4 +282,5 @@ module.exports = {
   buildSystemPrompt,
   MAX_ROUNDS,
   MAX_TURN_MS,
+  visionIsOn,
 };

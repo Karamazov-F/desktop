@@ -36,7 +36,42 @@ const ASSETS = {
     url: "https://registry.npmjs.org/sherpa-onnx-win-x64/-/sherpa-onnx-win-x64-1.13.4.tgz",
     sha256: "c180199ee4ed16a25b8ed50e2706a2d3dbe1aaa8b0699ea7d249288290c7998e",
   },
+  sherpaLicense: {
+    file: "sherpa-onnx-1.13.4-LICENSE",
+    url: "https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.4/LICENSE",
+    sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+  },
+  onnxruntimeLicense: {
+    file: "onnxruntime-v1.22.1-LICENSE",
+    url: "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.22.1/LICENSE",
+    sha256: "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
+  },
 };
+
+const PYTHON_CANDIDATES = [
+  { cmd: "python3", args: [] },
+  { cmd: "python", args: [] },
+  { cmd: "py", args: ["-3"] },
+];
+
+function pickPython(run) {
+  const probe =
+    run ||
+    ((candidate) => {
+      const result = spawnSync(
+        candidate.cmd,
+        [...candidate.args, "-c", "import sys; raise SystemExit(0 if sys.version_info[0] >= 3 else 1)"],
+        { encoding: "utf8" }
+      );
+      return result.status === 0;
+    });
+  for (const candidate of PYTHON_CANDIDATES) {
+    try {
+      if (probe(candidate)) return candidate;
+    } catch (_) {}
+  }
+  throw new Error("需要 Python 3 来解压语音模型。请确认 python3、python 或 py -3 可用。");
+}
 
 function sha256File(file) {
   return new Promise((resolve, reject) => {
@@ -103,20 +138,28 @@ if voice.exists():
 voice.mkdir(parents=True)
 modules = voice / "node_modules"
 modules.mkdir()
+lic = voice / "licenses"
+lic.mkdir()
 
 with zipfile.ZipFile(spec["nodeZip"]) as zf:
     name = next(n for n in zf.namelist() if n.endswith("/node.exe") or n.endswith("node.exe"))
-    data = zf.read(name)
-    (voice / "node.exe").write_bytes(data)
+    (voice / "node.exe").write_bytes(zf.read(name))
+    node_license = next(n for n in zf.namelist() if n.endswith("/LICENSE") and n.count("/") == 1)
+    (lic / "nodejs-LICENSE").write_bytes(zf.read(node_license))
 
 model_dir = voice / "models" / "sensevoice-small"
 model_dir.mkdir(parents=True)
 with tarfile.open(spec["modelArchive"], "r:bz2") as tf:
     for member in tf.getmembers():
         base = Path(member.name).name
-        if base in ("model.int8.onnx", "tokens.txt") and member.isfile():
+        if not member.isfile():
+            continue
+        if base in ("model.int8.onnx", "tokens.txt"):
             src = tf.extractfile(member)
             (model_dir / base).write_bytes(src.read())
+        elif base.lower() == "readme.md":
+            src = tf.extractfile(member)
+            (lic / "sensevoice-README.md").write_bytes(src.read())
 
 def untar_pkg(archive, dest_name):
     dest = modules / dest_name
@@ -150,6 +193,8 @@ needed = [
     modules / "sherpa-onnx-node" / "sherpa-onnx.js",
     dll_dir / "sherpa-onnx.node",
     voice / "onnxruntime.dll",
+    lic / "nodejs-LICENSE",
+    lic / "sensevoice-README.md",
 ]
 missing = [str(p) for p in needed if not p.exists()]
 if missing:
@@ -164,11 +209,30 @@ print("staged", voice)
     sherpaWin: paths.sherpaWin,
     worker: path.join(ROOT, "app", "workers", "sherpa-stt-worker.js"),
   });
-  const result = spawnSync("python3", ["-c", script, spec], { encoding: "utf8" });
+  const python = pickPython();
+  const result = spawnSync(python.cmd, [...python.args, "-c", script, spec], { encoding: "utf8" });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.status !== 0) {
     throw new Error("failed to stage voice runtime");
+  }
+}
+
+function installDownloadedLicenses(paths) {
+  const dir = path.join(VOICE, "licenses");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.copyFileSync(paths.sherpaLicense, path.join(dir, "sherpa-onnx-LICENSE"));
+  fs.copyFileSync(paths.onnxruntimeLicense, path.join(dir, "onnxruntime-LICENSE"));
+  for (const name of [
+    "nodejs-LICENSE",
+    "sensevoice-README.md",
+    "sherpa-onnx-LICENSE",
+    "onnxruntime-LICENSE",
+  ]) {
+    const file = path.join(dir, name);
+    if (!fs.existsSync(file) || fs.statSync(file).size < 20) {
+      throw new Error("missing license " + name);
+    }
   }
 }
 
@@ -178,9 +242,14 @@ async function main() {
     paths[key] = await ensureAsset(asset);
   }
   stage(paths);
+  installDownloadedLicenses(paths);
 }
 
-main().catch((err) => {
-  console.error(err.message || err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
+  });
+}
+
+module.exports = { pickPython, PYTHON_CANDIDATES };

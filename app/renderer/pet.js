@@ -634,13 +634,10 @@ async function bootstrap() {
   });
 
   const listenDot = document.getElementById("listen-dot");
-  let micToken = 0;
-  let pcm = null;
+  const mic = window.PetMicSession.create();
 
   async function discardMic() {
-    micToken += 1;
-    const rec = pcm;
-    pcm = null;
+    const rec = mic.markCancel();
     if (listenDot) listenDot.classList.remove("on");
     if (rec) {
       try {
@@ -650,24 +647,37 @@ async function bootstrap() {
   }
 
   async function startMic() {
-    const token = ++micToken;
+    const mine = mic.begin();
     const rec = window.PetPcm.create();
-    await rec.start();
-    if (token !== micToken) {
+    try {
+      await rec.start();
+    } catch (err) {
       try {
         await rec.stop(false);
       } catch (_) {}
+      throw err;
+    }
+    if (!mic.accept(mine, rec)) {
+      try {
+        await rec.stop(false);
+      } catch (_) {}
+      try {
+        await window.petApi.voiceCancel?.();
+      } catch (_) {}
       return;
     }
-    pcm = rec;
     if (listenDot) listenDot.classList.add("on");
   }
 
   async function stopMicAndSend() {
-    const rec = pcm;
-    pcm = null;
+    const rec = mic.markStop();
     if (listenDot) listenDot.classList.remove("on");
-    if (!rec) return;
+    if (!rec) {
+      try {
+        await window.petApi.voiceCancel?.();
+      } catch (_) {}
+      return;
+    }
     const buf = await rec.stop(true);
     await window.petApi.transcribeAudio(buf, "audio/wav", true);
   }
@@ -816,86 +826,6 @@ async function bootstrap() {
     if (ptr?.dragging || dragging) return;
     window.petApi.openPetMenu?.({ x: e.screenX, y: e.screenY });
   });
-
-  window.__petTest = {
-    getState: () => ({
-      currentStateName,
-      facing,
-      dragging,
-      lifeEnabled,
-      composeOpen,
-      lastKind,
-      lastAction,
-      roaming: Boolean(roamRaf),
-      lifted: puppet?.classList.contains("lifted"),
-    }),
-    catalog: () => catalog(),
-    clickAck: () => playClickReaction(),
-    openCompose: () => window.petApi.setComposeOpen?.({ compose: true }),
-    openHistory: () => window.petApi.openChat?.(),
-    closeCompose: () => window.petApi.setComposeOpen?.({ compose: false }),
-    openMenu: (pt) => window.petApi.openPetMenu?.(pt || { x: 80, y: 80 }),
-    showBubble: (text, ms) => showBubble(text, ms),
-    play: (name) => playState(name, { force: true, reason: "event" }),
-    walkMove: (opts) => {
-      bumpLife();
-      return startDirectedWalk({
-        token: lifeToken,
-        direction: opts?.direction || "left",
-        distance: opts?.distance || 220,
-        actionName: opts?.actionName || "walk",
-        then: "idle",
-      });
-    },
-    frameSrc: () => frontLayer().currentSrc || sprite.currentSrc,
-    pinFrame: (url) =>
-      new Promise((resolve) => {
-        bumpLife();
-        busy = true;
-        lifeEnabled = false;
-        clearAnimTimer();
-        framePaintToken += 1;
-        const token = framePaintToken;
-        frontIsA = true;
-        sprite.classList.add("snap");
-        if (spriteB) spriteB.classList.add("snap");
-        const done = () => {
-          if (token !== framePaintToken) return resolve(url);
-          resolve(sprite.currentSrc || url);
-        };
-        sprite.onload = done;
-        sprite.onerror = done;
-        sprite.src = url;
-        sprite.classList.add("show");
-        if (spriteB) {
-          spriteB.removeAttribute("src");
-          spriteB.classList.remove("show");
-        }
-        if (sprite.complete && sprite.naturalWidth) done();
-      }),
-    /** Rapid-fire action spam for flicker regression checks. */
-    spamActions: (names, times = 12) => {
-      const list = Array.isArray(names) && names.length ? names : Object.keys(currentPack?.states || {});
-      let i = 0;
-      for (let n = 0; n < times; n++) {
-        const name = list[i % list.length];
-        i += 1;
-        playState(name, { force: true, reason: "event" });
-      }
-      const aShow = sprite.classList.contains("show");
-      const bShow = spriteB ? spriteB.classList.contains("show") : false;
-      return {
-        currentStateName,
-        frontIsA,
-        aShow,
-        bShow,
-        covered: aShow || bShow,
-        token: framePaintToken,
-      };
-    },
-    setFacing,
-    setDragging,
-  };
 }
 
 bootstrap().catch(console.error);

@@ -10,29 +10,33 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dpet-slip-"));
 }
 
-test("rejects a crafted .dpet that contains traversal and absolute paths", () => {
-  const parent = tmpDir();
-  const dest = path.join(parent, "dest");
-  const archive = path.join(parent, "evil.dpet");
-  const marker = `pwned-${process.pid}-${Date.now()}.txt`;
-  dpet.encryptFiles(
-    [
-      { rel: `../${marker}`, data: Buffer.from("traversal") },
-      { rel: `nested/../../${marker}`, data: Buffer.from("nested") },
-      { rel: `/tmp/${marker}`, data: Buffer.from("posix-abs") },
-      { rel: `C:/Windows/${marker}`, data: Buffer.from("drive") },
-      { rel: `\\\\server\\share\\${marker}`, data: Buffer.from("unc") },
-      { rel: "sprites/ok.txt", data: Buffer.from("should-not-land") },
-    ],
-    archive,
-    { id: "evil-pack" }
-  );
+const BAD_PATHS = [
+  ["parent traversal", "../pwned.txt"],
+  ["nested traversal", "nested/../../pwned.txt"],
+  ["backslash traversal", "..\\pwned.txt"],
+  ["posix absolute", "/tmp/pwned.txt"],
+  ["drive absolute", "C:/Windows/pwned.txt"],
+  ["unc", "\\\\server\\share\\pwned.txt"],
+];
 
-  assert.throws(() => dpet.decryptToDir(archive, dest), /非法路径/);
-  assert.equal(fs.existsSync(path.join(parent, marker)), false);
-  assert.equal(fs.existsSync(path.join("/tmp", marker)), false);
-  assert.equal(fs.existsSync(path.join(dest, "sprites", "ok.txt")), false);
-});
+for (const [label, rel] of BAD_PATHS) {
+  test(`rejects a .dpet entry with ${label}`, () => {
+    const parent = tmpDir();
+    const dest = path.join(parent, "dest");
+    const archive = path.join(parent, "evil.dpet");
+    dpet.encryptFiles(
+      [
+        { rel, data: Buffer.from("nope") },
+        { rel: "sprites/ok.txt", data: Buffer.from("should-not-land") },
+      ],
+      archive,
+      { id: "evil-pack" }
+    );
+    assert.throws(() => dpet.decryptToDir(archive, dest), /非法路径/);
+    assert.equal(fs.existsSync(path.join(dest, "sprites", "ok.txt")), false);
+    assert.equal(fs.existsSync(dest), false);
+  });
+}
 
 test("imports a normal .dpet and keeps every file inside the destination", () => {
   const parent = tmpDir();

@@ -28,18 +28,35 @@
     return new Uint8Array(buffer);
   }
 
+  function lowPass(input, fromRate, toRate) {
+    if (!input.length || !(fromRate > toRate)) return input;
+    const cutoff = toRate * 0.45;
+    const dt = 1 / fromRate;
+    const rc = 1 / (2 * Math.PI * cutoff);
+    const alpha = dt / (rc + dt);
+    const out = new Float32Array(input.length);
+    let y = input[0] || 0;
+    out[0] = y;
+    for (let i = 1; i < input.length; i++) {
+      y += alpha * (input[i] - y);
+      out[i] = y;
+    }
+    return out;
+  }
+
   function resample(input, fromRate, toRate) {
     if (!input.length) return input;
-    if (fromRate === toRate) return input;
+    const filtered = lowPass(input, fromRate, toRate);
+    if (fromRate === toRate) return filtered;
     const ratio = fromRate / toRate;
-    const length = Math.max(1, Math.round(input.length / ratio));
+    const length = Math.max(1, Math.round(filtered.length / ratio));
     const out = new Float32Array(length);
     for (let i = 0; i < length; i++) {
       const pos = i * ratio;
       const idx = Math.floor(pos);
       const frac = pos - idx;
-      const a = input[idx] || 0;
-      const b = input[Math.min(idx + 1, input.length - 1)] || a;
+      const a = filtered[idx] || 0;
+      const b = filtered[Math.min(idx + 1, filtered.length - 1)] || a;
       out[i] = a + (b - a) * frac;
     }
     return out;
@@ -65,31 +82,7 @@
     let source = null;
     let chunks = [];
 
-    async function start() {
-      chunks = [];
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-        },
-      });
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      ctx = new AudioCtx();
-      source = ctx.createMediaStreamSource(stream);
-      processor = ctx.createScriptProcessor(4096, 1, 1);
-      processor.onaudioprocess = (event) => {
-        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
-      };
-      mute = ctx.createGain();
-      mute.gain.value = 0;
-      source.connect(processor);
-      processor.connect(mute);
-      mute.connect(ctx.destination);
-      if (ctx.state === "suspended") await ctx.resume();
-    }
-
-    async function stop(encode) {
+    async function release(encode) {
       const rate = ctx ? ctx.sampleRate : 16000;
       const recorded = chunks;
       chunks = [];
@@ -128,8 +121,42 @@
       return encodeWav(pcm, 16000);
     }
 
-    return { start, stop };
+    async function start() {
+      chunks = [];
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: 1,
+            echoCancellation: true,
+            noiseSuppression: true,
+          },
+        });
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        ctx = new AudioCtx();
+        source = ctx.createMediaStreamSource(stream);
+        processor = ctx.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (event) => {
+          chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+        };
+        mute = ctx.createGain();
+        mute.gain.value = 0;
+        source.connect(processor);
+        processor.connect(mute);
+        mute.connect(ctx.destination);
+        if (ctx.state === "suspended") await ctx.resume();
+      } catch (err) {
+        try {
+          await release(false);
+        } catch (_) {}
+        throw err;
+      }
+    }
+
+    return { start, stop: release };
   }
 
-  window.PetPcm = { create, encodeWav, resample };
+  const api = { create, encodeWav, resample, lowPass };
+  if (typeof module === "object" && module.exports) module.exports = api;
+  const root = typeof globalThis !== "undefined" ? globalThis : window;
+  root.PetPcm = api;
 })();

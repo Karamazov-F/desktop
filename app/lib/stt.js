@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -147,6 +148,7 @@ function sendRequest(obj) {
       if (!pending.has(id)) return;
       pending.delete(id);
       reject(new Error("语音识别超时"));
+      shutdown();
     }, REQUEST_TIMEOUT_MS);
     pending.set(id, {
       resolve: (msg) => {
@@ -162,9 +164,16 @@ function sendRequest(obj) {
   });
 }
 
+function tempWavPath() {
+  return path.join(
+    os.tmpdir(),
+    `pet-rec-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.wav`
+  );
+}
+
 async function transcribeBuffer(buffer) {
   await ensureWorker();
-  const wav = path.join(os.tmpdir(), `pet-rec-${Date.now()}.wav`);
+  const wav = tempWavPath();
   fs.writeFileSync(wav, buffer);
   try {
     const result = await sendRequest({ path: wav });
@@ -197,5 +206,6 @@ module.exports = {
   warmup,
   shutdown,
   ensureWorker,
+  tempWavPath,
   REQUEST_TIMEOUT_MS,
 };

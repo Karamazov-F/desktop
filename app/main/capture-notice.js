@@ -1,12 +1,13 @@
 const { BrowserWindow, screen } = require("electron");
 const { appFile } = require("./state");
 const { browserWebPreferences, hardenWindow } = require("./window-guard");
+const { createHideWait } = require("./hide-wait");
 
 const MIN_VISIBLE_MS = 1200;
 let win = null;
 let shownAt = 0;
-let hideTimer = null;
 let visibleWanted = false;
+const hideWait = createHideWait();
 
 function place() {
   if (!win || win.isDestroyed()) return;
@@ -22,9 +23,9 @@ function place() {
 }
 
 function show() {
-  clearTimeout(hideTimer);
   visibleWanted = true;
   shownAt = Date.now();
+  hideWait.cancel();
   if (win && !win.isDestroyed()) {
     place();
     if (!win.isVisible()) win.showInactive();
@@ -73,9 +74,7 @@ function restoreAfterGrab() {
 async function hide() {
   visibleWanted = false;
   const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - shownAt));
-  await new Promise((resolve) => {
-    hideTimer = setTimeout(resolve, wait);
-  });
+  await hideWait.wait(wait);
   if (!visibleWanted && win && !win.isDestroyed()) win.hide();
 }
 

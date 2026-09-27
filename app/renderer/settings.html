@@ -32,10 +32,8 @@
           <input id="deepseekApiKey" type="password" placeholder="sk-…" autocomplete="off" />
         </label>
         <p id="keyHint" class="hint"></p>
-        <label class="field">
-          接口
-          <input id="deepseekBaseUrl" type="text" />
-        </label>
+        <button type="button" id="clearApiKey">清除 API Key</button>
+        <p class="hint">对话发往 https://api.deepseek.com，这个地址不能改。</p>
         <div class="field-row">
           <label class="field">
             文本模型
@@ -58,9 +56,9 @@
         <label class="toggle">
           <input id="lifeStream" type="checkbox" />
           <i></i>
-          <span>自己过日子（暂时关闭：不自动切动作）</span>
+          <span>空闲时自己活动</span>
         </label>
-        <p class="hint">自动切动作先关掉，只循环待机；托盘/单击仍可手动播。左右走用同一套行走帧做水平翻转。</p>
+        <p class="hint">关闭后只循环待机。托盘和单击仍可以手动播放动作。</p>
         <label class="toggle">
           <input id="hideOnFullscreen" type="checkbox" />
           <i></i>

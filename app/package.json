@@ -11,7 +11,7 @@
     "fetch-vendor": "node ../scripts/fetch-vendor.js",
     "predist": "node ../scripts/fetch-vendor.js",
     "dist": "electron-builder --win nsis --x64",
-    "test": "node --test ../test/*.js"
+    "test": "node ../test/run.js"
   },
   "engines": {
     "node": ">=18"
@@ -39,7 +39,8 @@
       "**/*",
       "!vendor/**",
       "!dist/**",
-      "!**/*.md"
+      "!**/*.md",
+      "!workers/**"
     ],
     "extraResources": [
       {
@@ -49,9 +50,14 @@
       {
         "from": "vendor/voice",
         "to": "voice"
+      },
+      {
+        "from": "node_modules/koffi/LICENSE.txt",
+        "to": "licenses/koffi-LICENSE.txt"
       }
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

@@ -6,7 +6,7 @@ const { state, userData, loadSettings, saveSettings } = require("./state");
 const { registerIpc } = require("./ipc");
 
 const PRIVACY_DETAIL = [
-  "文字对话：你输入的内容、角色设定，以及（若打开「记住对话」）本机保存的记忆摘要，会发送到你填写的 DeepSeek 接口（默认 https://api.deepseek.com）。没有 API Key 时只用本机台词，不联网聊天。",
+  "文字对话：你输入的内容、角色设定，以及（若打开「记住对话」）本机保存的记忆摘要，会发送到 DeepSeek（https://api.deepseek.com）。这个地址是固定的。没有 API Key 时只用本机台词，不联网聊天。",
   "",
   "查看屏幕：默认关闭。打开后，只有你让它看屏幕时才会截取主屏幕，并在画面上明确提示。截图会发给视觉接口。碎碎念不会截屏。",
   "",
@@ -45,15 +45,27 @@ function start() {
     const tray = require("./tray");
 
     require("../lib/paths").ensureDir(userData());
-    session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
-      const mic =
-        permission === "media" || permission === "microphone" || permission === "audioCapture";
-      callback(Boolean(mic && isAppContents(wc)));
+    const { allowAppAudio } = require("./media-permission");
+    const appDir = require("../lib/paths").appDir();
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+      callback(
+        allowAppAudio({
+          permission,
+          requestingUrl: details?.requestingUrl,
+          mediaTypes: details?.mediaTypes,
+          appDir,
+          isAppWindow: isAppContents(wc),
+        })
+      );
     });
-    session.defaultSession.setPermissionCheckHandler((wc, permission) => {
-      const mic =
-        permission === "media" || permission === "microphone" || permission === "audioCapture";
-      return Boolean(mic && isAppContents(wc));
+    session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin, details) => {
+      return allowAppAudio({
+        permission,
+        requestingUrl: details?.requestingUrl || requestingOrigin,
+        mediaTypes: details?.mediaTypes,
+        appDir,
+        isAppWindow: isAppContents(wc),
+      });
     });
     pet.createPetWindow();
     try {
@@ -62,9 +74,6 @@ function start() {
       console.warn("tray failed", err);
     }
     stt.warmup();
-
-    if (process.env.PET_OPEN_CHAT === "1") windows.revealPetChat({ history: true });
-    if (process.env.PET_OPEN_SETTINGS === "1") windows.openSettingsWindow();
 
     const ok = tray.registerHotkeys();
     if (ok.voice === false) console.warn("voice hotkey not bound");
@@ -83,7 +92,11 @@ function start() {
         buttons: ["我知道了"],
         noLink: true,
       });
-      saveSettings({ privacyAccepted: true });
+      try {
+        saveSettings({ privacyAccepted: true });
+      } catch (err) {
+        console.warn("privacy flag not saved", err);
+      }
     }
 
     const s1 = loadSettings();
@@ -102,7 +115,11 @@ function start() {
             ),
           7000
         );
-        saveSettings({ onboarded: true });
+        try {
+          saveSettings({ onboarded: true });
+        } catch (err) {
+          console.warn("onboarding flag not saved", err);
+        }
       }, 800);
     }
 

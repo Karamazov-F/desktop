@@ -34,8 +34,14 @@ async function chatCompletions({
   maxTokens = 512,
   thinking = "disabled",
   timeoutMs = 45000,
+  signal,
 }) {
   if (!apiKey) throw new Error("missing api key");
+  if (signal?.aborted) {
+    const err = new Error("思考时间过长");
+    err.name = "AbortError";
+    throw err;
+  }
   const url = `${normalizeBase(baseUrl)}/chat/completions`;
   const body = {
     model,
@@ -54,6 +60,8 @@ async function chatCompletions({
 
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
+  const onAbort = () => ac.abort();
+  if (signal) signal.addEventListener("abort", onAbort);
   let res;
   try {
     res = await fetch(url, {
@@ -67,6 +75,7 @@ async function chatCompletions({
     });
   } finally {
     clearTimeout(t);
+    if (signal) signal.removeEventListener("abort", onAbort);
   }
 
   const text = await res.text();
@@ -91,6 +100,7 @@ async function chatCompletionsRetry(opts) {
   try {
     return await chatCompletions(opts);
   } catch (err) {
+    if (opts?.signal?.aborted || err?.name === "AbortError") throw err;
     const msg = String(err.message || err);
     if (/thinking/i.test(msg) || err.status === 400) {
       const { thinking, ...rest } = opts;

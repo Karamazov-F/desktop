@@ -129,10 +129,36 @@
         animation: listening-pulse 1s ease-in-out infinite;
       }
       @keyframes listening-pulse { 50% { box-shadow: 0 0 0 5px rgba(241, 156, 134, 0.18); } }
+      .pet-floater {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        z-index: 6;
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+        animation: pet-floater-rise 2s linear forwards;
+      }
+      .pet-floater-text {
+        display: block;
+        color: #111;
+        font: 700 16px/1.15 var(--pet-ui-font);
+        white-space: nowrap;
+        letter-spacing: 0.02em;
+        text-shadow:
+          0 -2px 0 #fff, 0 2px 0 #fff, -2px 0 0 #fff, 2px 0 0 #fff,
+          -2px -2px 0 #fff, 2px -2px 0 #fff, -2px 2px 0 #fff, 2px 2px 0 #fff,
+          0 -1px 0 #fff, 0 1px 0 #fff, -1px 0 0 #fff, 1px 0 0 #fff;
+      }
+      @keyframes pet-floater-rise {
+        0% { transform: translate(-50%, calc(-50% + var(--rise, 20px))); opacity: 1; }
+        10% { transform: translate(-50%, -50%); opacity: 1; }
+        100% { transform: translate(-50%, -50%); opacity: 1; }
+      }
       @media (prefers-reduced-motion: reduce) {
         .sprite-layer {
           transition: none;
         }
         #listen-dot.on { animation: none; }
+        .pet-floater { animation: none; }
       }
     

@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { decryptToDir, isDpetFile } = require("./dpet");
+const { decryptToDir, isDpetFile, COMPLETE_MARKER } = require("./dpet");
 const { ensureDir, packCacheDir } = require("./paths");
 const { isSafePackId, resolveInside } = require("./safe-path");
 
@@ -16,8 +16,12 @@ function listPacksFromDirs(dirs, { cacheDir } = {}) {
       if (ent.name.startsWith(".") || ent.name === "_author") continue;
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) {
-        const pack = readPack(dir, ent.name);
-        if (pack) byId.set(pack.id, pack);
+        try {
+          const pack = readPack(dir, ent.name);
+          if (pack) byId.set(pack.id, pack);
+        } catch (err) {
+          console.warn("skip pack", ent.name, err.message);
+        }
         continue;
       }
       if (ent.isFile() && isDpetFile(ent.name) && cacheDir) {
@@ -42,25 +46,58 @@ function cacheKeyForDpet(filePath) {
 function readDpetPack(filePath, cacheDir) {
   const key = cacheKeyForDpet(filePath);
   const dest = path.join(cacheDir, key);
-  const marker = path.join(dest, "pack.json");
-  if (!fs.existsSync(marker)) {
-    ensureDir(cacheDir);
-    decryptToDir(filePath, dest);
+  const rejected = `${dest}.rejected`;
+  if (fs.existsSync(rejected)) return null;
+  if (!fs.existsSync(path.join(dest, COMPLETE_MARKER))) {
+    try {
+      ensureDir(cacheDir);
+      fs.rmSync(dest, { recursive: true, force: true });
+      decryptToDir(filePath, dest);
+      const pack = readPackDir(dest);
+      if (!pack || !isSafePackId(pack.id)) {
+        fs.rmSync(dest, { recursive: true, force: true });
+        fs.writeFileSync(rejected, "invalid");
+        return null;
+      }
+    } catch (err) {
+      fs.rmSync(dest, { recursive: true, force: true });
+      try {
+        fs.writeFileSync(rejected, String(err.message || "rejected"));
+      } catch (_) {}
+      throw err;
+    }
   }
-  return readPack(path.dirname(dest), path.basename(dest));
+  return readPackDir(dest);
 }
 
 function importDpet(filePath, importedDir, cacheDir) {
   ensureDir(importedDir);
+  ensureDir(cacheDir);
   const base = path.basename(filePath);
   if (!isDpetFile(base) || base !== path.basename(base) || base.includes("..")) {
     throw new Error("角色包文件名不合法");
   }
   const destFile = resolveInside(importedDir, base);
-  fs.copyFileSync(filePath, destFile);
-  const pack = readDpetPack(destFile, cacheDir);
-  if (!pack || !isSafePackId(pack.id)) throw new Error("角色包无效");
-  return pack;
+  const staging = fs.mkdtempSync(path.join(cacheDir, ".import-"));
+  const partialFile = `${destFile}.partial`;
+  let replaced = false;
+  try {
+    decryptToDir(filePath, staging);
+    const pack = readPackDir(staging);
+    if (!pack || !isSafePackId(pack.id)) throw new Error("角色包无效");
+    fs.copyFileSync(filePath, partialFile);
+    fs.renameSync(partialFile, destFile);
+    replaced = true;
+    const cacheDest = path.join(cacheDir, cacheKeyForDpet(destFile));
+    fs.rmSync(cacheDest, { recursive: true, force: true });
+    fs.renameSync(staging, cacheDest);
+    return readPackDir(cacheDest);
+  } catch (err) {
+    fs.rmSync(staging, { recursive: true, force: true });
+    fs.rmSync(partialFile, { force: true });
+    if (replaced) fs.rmSync(destFile, { force: true });
+    throw err;
+  }
 }
 
 function importFolder(srcDir, importedDir) {
@@ -87,8 +124,15 @@ function copyDir(src, dest) {
     if (ent.name === "_author" || ent.name === "node_modules") continue;
     const from = path.join(src, ent.name);
     const to = path.join(dest, ent.name);
-    if (ent.isDirectory()) copyDir(from, to);
-    else fs.copyFileSync(from, to);
+    let st;
+    try {
+      st = fs.lstatSync(from);
+    } catch {
+      continue;
+    }
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) copyDir(from, to);
+    else if (st.isFile()) fs.copyFileSync(from, to);
   }
 }
 
@@ -144,24 +188,23 @@ function normalizeState(dir, key, value) {
   return out;
 }
 
-function readPack(packsDir, packId) {
-  if (!isSafePackId(packId)) return null;
-  let dir;
+function readPackDir(dir) {
+  const manifestPath = path.join(dir, "pack.json");
+  if (!fs.existsSync(manifestPath)) return null;
+  let raw;
   try {
-    dir = resolveInside(packsDir, packId);
+    raw = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   } catch {
     return null;
   }
-  const manifestPath = path.join(dir, "pack.json");
-  if (!fs.existsSync(manifestPath)) return null;
-  const raw = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const states = {};
   for (const [key, value] of Object.entries(raw.states || {})) {
     const normalized = normalizeState(dir, key, value);
     if (normalized) states[key] = normalized;
   }
   if (!states.idle) return null;
-  const id = raw.id || packId;
+  const folder = path.basename(dir);
+  const id = raw.id || (isSafePackId(folder) ? folder : "");
   if (!isSafePackId(id)) return null;
   const persona =
     raw.persona && typeof raw.persona === "object" ? raw.persona : null;
@@ -169,7 +212,7 @@ function readPack(packsDir, packId) {
     raw.dialogue && typeof raw.dialogue === "object" ? raw.dialogue : null;
   return {
     id,
-    name: (persona && persona.displayName) || raw.name || packId,
+    name: (persona && persona.displayName) || raw.name || id,
     version: raw.version || "0.1.0",
     author: raw.author || "",
     license: raw.license || "",
@@ -180,6 +223,17 @@ function readPack(packsDir, packId) {
     actions: Object.keys(states).filter((k) => !["idle", "blink"].includes(k)),
     dir,
   };
+}
+
+function readPack(packsDir, packId) {
+  if (!isSafePackId(packId)) return null;
+  let dir;
+  try {
+    dir = resolveInside(packsDir, packId);
+  } catch {
+    return null;
+  }
+  return readPackDir(dir);
 }
 
 function pathToFileUrl(p) {

@@ -142,8 +142,8 @@ function rebuildTrayMenu() {
       {
         label: "朝向",
         submenu: [
-          { label: "朝右（不翻转）", click: () => pet.sendFacing("right") },
-          { label: "朝左（水平翻转）", click: () => pet.sendFacing("left") },
+          { label: "朝右", click: () => pet.sendFacing("right") },
+          { label: "朝左", click: () => pet.sendFacing("left") },
         ],
       },
       { type: "separator" },

@@ -114,8 +114,7 @@ async function runChatter() {
         settings: loadSettings(),
         userText: "请对主人碎碎念几句，像陪在旁边随口说，可以稍长一些。不要提你是AI，也不要列清单。",
         userData: userData(),
-        captureScreen: null,
-        allowVision: false,
+        ...require("../lib/chatter").chatterTurnExtras(),
         applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
         applyMove: (dir, dist) => pet.movePet(dir, dist),
       });

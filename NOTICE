@@ -2,4 +2,13 @@
 
 - `app/` 里的程序代码：MIT，见 LICENSE。
 - `packs/xiao-jing/` 里的小鲸形象、立绘和动画：all rights reserved。pack.json 的 license 字段写的是 All-Rights-Reserved。MIT 不覆盖这些素材，请勿再分发。
-- `app/renderer/fonts/LXGWWenKai-Regular.woff2`：霞鹜文楷，SIL Open Font License 1.1，见 app/renderer/fonts/OFL-LXGWWenKai.txt。
+- `app/renderer/fonts/LXGWWenKai-Regular.woff2`：霞鹜文楷 Regular 完整字库，SIL Open Font License 1.1，见 app/renderer/fonts/OFL-LXGWWenKai.txt。
+
+安装包里还有这些第三方组件。对应许可文本随安装包放在 `resources/voice/licenses/` 或 `resources/licenses/`，Electron 与 Chromium 的许可在安装目录的 `LICENSE.electron.txt` 和 `LICENSES.chromium.html`（由 electron-builder 从 Electron 发行包带入）。
+
+- Node.js 22.19.0 的 `node.exe`：MIT，`nodejs-LICENSE`。只给语音识别 sidecar 用。
+- sherpa-onnx 1.13.4（`sherpa-onnx-node` 与 `sherpa-onnx-win-x64`）：Apache-2.0，`sherpa-onnx-LICENSE`。
+- ONNX Runtime（随 sherpa 的 Windows 预编译包提供）：MIT，`onnxruntime-LICENSE`。
+- SenseVoice-Small int8 模型：随上游压缩包附带的说明在 `sensevoice-README.md`。
+- koffi：MIT，`resources/licenses/koffi-LICENSE.txt`。
+- Electron 与 Chromium：安装目录中的 `LICENSE.electron.txt`、`LICENSES.chromium.html`。

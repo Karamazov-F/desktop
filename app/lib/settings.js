@@ -98,9 +98,13 @@ function sanitizePartial(partial) {
     out.hideHotkey = hotkeys.normalize(partial.hideHotkey);
   }
   if (Object.prototype.hasOwnProperty.call(partial, "deepseekApiKey")) {
-    const key = String(partial.deepseekApiKey || "");
-    if (key.length > 512 || /[\r\n\0]/.test(key)) throw new Error("API Key 无效");
-    if (key) out.deepseekApiKey = key;
+    if (partial.deepseekApiKey === null) {
+      out.deepseekApiKey = null;
+    } else {
+      const key = String(partial.deepseekApiKey || "");
+      if (key.length > 512 || /[\r\n\0]/.test(key)) throw new Error("API Key 无效");
+      if (key) out.deepseekApiKey = key;
+    }
   }
   return out;
 }
@@ -146,14 +150,26 @@ function applyStored(stored) {
 function writeDisk(userData, settings, { sealKey } = {}) {
   const disk = applyStored(settings);
   delete disk.deepseekApiKey;
-  if (settings.deepseekApiKey) {
-    if (typeof sealKey !== "function") throw new Error("系统加密不可用，无法保存 API Key");
-    disk.deepseekApiKeyEnc = sealKey(settings.deepseekApiKey);
+  let keyError = null;
+  if (settings.deepseekApiKey === null) {
+    // explicit clear: omit both the plaintext key and the ciphertext
+  } else if (settings.retainPlaintextKey && settings.deepseekApiKey) {
+    disk.deepseekApiKey = settings.deepseekApiKey;
+  } else if (settings.deepseekApiKey) {
+    try {
+      if (typeof sealKey !== "function") throw new Error("系统加密不可用，无法保存 API Key");
+      disk.deepseekApiKeyEnc = sealKey(settings.deepseekApiKey);
+    } catch (err) {
+      keyError = err instanceof Error ? err : new Error("系统加密不可用，无法保存 API Key");
+      if (settings.deepseekApiKeyEnc) disk.deepseekApiKeyEnc = settings.deepseekApiKeyEnc;
+      else if (settings.previousPlaintextKey) disk.deepseekApiKey = settings.previousPlaintextKey;
+    }
   } else if (settings.deepseekApiKeyEnc) {
     disk.deepseekApiKeyEnc = settings.deepseekApiKeyEnc;
   }
   ensureDir(userData);
   fs.writeFileSync(settingsPath(userData), JSON.stringify(disk, null, 2), "utf8");
+  return keyError;
 }
 
 function loadSettings(userData, opts = {}) {
@@ -161,29 +177,30 @@ function loadSettings(userData, opts = {}) {
   const stored = readStored(userData);
   const next = applyStored(stored);
   const plain = typeof stored.deepseekApiKey === "string" ? stored.deepseekApiKey : "";
-  let enc = typeof stored.deepseekApiKeyEnc === "string" ? stored.deepseekApiKeyEnc : "";
+  const enc = typeof stored.deepseekApiKeyEnc === "string" ? stored.deepseekApiKeyEnc : "";
   if (plain) {
     next.deepseekApiKey = plain;
+    next.retainPlaintextKey = true;
     if (typeof opts.sealKey === "function") {
       try {
-        if (!enc) enc = opts.sealKey(plain);
-        next.deepseekApiKeyEnc = enc;
+        next.deepseekApiKeyEnc = enc || opts.sealKey(plain);
+        next.retainPlaintextKey = false;
         writeDisk(userData, next, opts);
-        delete next.deepseekApiKeyEnc;
       } catch (_) {
+        next.retainPlaintextKey = true;
         delete next.deepseekApiKeyEnc;
       }
     }
     return next;
   }
+  next.deepseekApiKey = "";
+  if (enc) next.deepseekApiKeyEnc = enc;
   if (enc && typeof opts.openKey === "function") {
     try {
       next.deepseekApiKey = opts.openKey(enc);
     } catch {
       next.deepseekApiKey = "";
     }
-  } else {
-    next.deepseekApiKey = "";
   }
   return next;
 }
@@ -192,20 +209,37 @@ function saveSettings(userData, partial, opts = {}) {
   const patch = sanitizePartial(partial || {});
   const current = loadSettings(userData, opts);
   const next = { ...current, ...patch };
+  if (patch.deepseekApiKey === null) {
+    next.deepseekApiKey = null;
+    next.deepseekApiKeyEnc = "";
+    next.retainPlaintextKey = false;
+  } else if (patch.deepseekApiKey) {
+    if (current.retainPlaintextKey && current.deepseekApiKey) {
+      next.previousPlaintextKey = current.deepseekApiKey;
+    }
+    next.deepseekApiKey = patch.deepseekApiKey;
+    next.retainPlaintextKey = false;
+  }
   if (next.voiceHotkey && next.hideHotkey && next.voiceHotkey === next.hideHotkey) {
     throw new Error("隐藏和语音不能用同一组快捷键");
   }
-  writeDisk(userData, next, opts);
+  const keyError = writeDisk(userData, next, opts);
+  if (keyError && patch.deepseekApiKey) {
+    throw new Error("系统加密不可用，无法保存 API Key");
+  }
   return loadSettings(userData, opts);
 }
 
 function publicSettings(settings) {
   const s = { ...settings };
   const key = s.deepseekApiKey || "";
-  s.hasDeepseekKey = Boolean(key);
+  s.hasDeepseekKey = Boolean(key || s.deepseekApiKeyEnc);
   s.deepseekApiKeyMasked = key ? `${key.slice(0, 5)}…${key.slice(-4)}` : "";
+  s.keyUnreadable = Boolean(s.deepseekApiKeyEnc && !key);
   delete s.deepseekApiKey;
   delete s.deepseekApiKeyEnc;
+  delete s.retainPlaintextKey;
+  delete s.previousPlaintextKey;
   return s;
 }
 
