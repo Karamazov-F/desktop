@@ -3,8 +3,7 @@ function createVoiceGate() {
   let busy = false;
 
   function matches(sessionId) {
-    if (sessionId === undefined) return true;
-    if (sessionId === null || sessionId === "") return false;
+    if (sessionId === undefined || sessionId === null || sessionId === "") return false;
     const id = Number(sessionId);
     if (!Number.isInteger(id)) return false;
     return id === session;

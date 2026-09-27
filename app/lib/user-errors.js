@@ -4,11 +4,15 @@
  */
 const TOO_EARLY = "没听清，按住稍久一点再说";
 const VOICE_PROCESS_FAILED = "语音处理出错，请再试一次";
-const GAVE_UP = "这次没能回复，请再试一次";
-const TIMEOUT_REPLY = "这次回复超时了，已改用本地回复";
-const NETWORK_REPLY = "连不上 DeepSeek，请检查网络，已改用本地回复";
+const LOCAL_REPLY = "这次先用本地回复";
+const NO_REPLY = "这次没能回复，请再试一次";
+const TIMEOUT_REPLY = "这次回复超时了，这次先用本地回复";
+const NETWORK_REPLY = "连不上 DeepSeek，请检查网络，这次先用本地回复";
 const BALANCE_REPLY = "DeepSeek 账户余额不足，请到 DeepSeek 开放平台充值；这次先用本地回复";
-const KEY_INVALID = "API Key 无效，请到设置里重新填写";
+const KEY_INVALID = "API Key 无效，请到设置里重新填写；这次先用本地回复";
+const KEY_FORBIDDEN = "没有权限访问 DeepSeek，请检查账号状态；这次先用本地回复";
+const RATE_LIMIT = "请求太频繁，稍等一下再试；这次先用本地回复";
+const UNKNOWN_REPLY = "这次没能从 DeepSeek 得到回复，这次先用本地回复";
 
 const FIELD_LABELS = {
   deepseekEnabled: "DeepSeek",
@@ -38,10 +42,10 @@ function userFacingError(err) {
   const raw = String((err && err.message) || err || "");
   const status = Number(err && err.status) || 0;
   const name = (err && err.name) || "";
-  if (err && err.code === "EMAXBODY") return GAVE_UP;
+  if (err && err.code === "EMAXBODY") return UNKNOWN_REPLY;
+  if (status === 403) return KEY_FORBIDDEN;
   if (
     status === 401 ||
-    status === 403 ||
     /missing api key|invalid api key|unauthorized|authentication fails|invalid_api_key/i.test(raw)
   ) {
     return KEY_INVALID;
@@ -50,7 +54,7 @@ function userFacingError(err) {
     return BALANCE_REPLY;
   }
   if (status === 429 || /rate limit|too many requests/i.test(raw)) {
-    return "请求太频繁，稍等一下再试";
+    return RATE_LIMIT;
   }
   if (name === "AbortError" || status === 408 || /aborterror|\btimeout\b|timed out|etimedout|思考时间过长/i.test(raw)) {
     return TIMEOUT_REPLY;
@@ -62,8 +66,10 @@ function userFacingError(err) {
   ) {
     return NETWORK_REPLY;
   }
-  if (raw && /^[\u4e00-\u9fff0-9，。！？、：；「」（）()\s]+$/.test(raw)) return raw;
-  return GAVE_UP;
+  if (raw && /^[\u4e00-\u9fff0-9，。！？、：；「」（）()\s]+$/.test(raw)) {
+    return raw.includes(LOCAL_REPLY) ? raw : `${raw.replace(/。$/, "")}，${LOCAL_REPLY}`;
+  }
+  return UNKNOWN_REPLY;
 }
 
 function micFailureMessage(err) {
@@ -82,7 +88,9 @@ function micFailureMessage(err) {
 
 function sttFailureMessage(err) {
   const raw = String((err && err.message) || err || "");
-  if (/未随安装包提供|语音组件|MODULE_NOT_FOUND|cannot find module|\bENOENT\b/i.test(raw)) {
+  const namesRuntime =
+    /语音组件未随安装包提供|model\.int8\.onnx|tokens\.txt|sherpa-stt-worker\.js|[/\\]node\.exe/i.test(raw);
+  if (namesRuntime && /未随安装包提供|\bENOENT\b|no such file|not found/i.test(raw)) {
     return "语音组件损坏，请重新安装桌宠";
   }
   if (/超时|timed out|etimedout|\btimeout\b/i.test(raw)) {
@@ -98,7 +106,7 @@ function keyHintText(settings) {
     return "已保存的 Key 暂时无法读取。可以清除后重新填写。";
   }
   if (s.keyStorage === "plaintext") {
-    return `已保存 Key：${masked}。系统加密不可用，这枚 Key 仍以明文留在本机。不放心可以点“清除 API Key”`;
+    return "这台电脑不支持系统加密，Key 以明文保存在本机；不放心可以点“清除 API Key”。";
   }
   if (s.keyStorage === "encrypted" || (s.hasDeepseekKey && !s.keyStorage)) {
     return `已保存 Key：${masked}（系统加密，不明文存放）`;
@@ -130,8 +138,10 @@ function displaySaveError(err) {
 const api = {
   TOO_EARLY,
   VOICE_PROCESS_FAILED,
-  GAVE_UP,
+  LOCAL_REPLY,
+  NO_REPLY,
   TIMEOUT_REPLY,
+  UNKNOWN_REPLY,
   fieldLabel,
   userFacingError,
   micFailureMessage,

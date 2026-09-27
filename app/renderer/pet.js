@@ -705,6 +705,9 @@ async function bootstrap() {
       result = await window.petApi.transcribeAudio(buf, "audio/wav", true, sessionId);
     } catch (err) {
       console.error(err);
+      try {
+        await window.petApi.voiceCancel?.(sessionId);
+      } catch (_) {}
       showBubble(failed);
       return;
     }

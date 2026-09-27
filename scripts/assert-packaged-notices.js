@@ -69,24 +69,26 @@ function assertPackaged(unpackedDir = UNPACKED, notice = fs.readFileSync(NOTICE_
   if (!fs.existsSync(unpackedDir)) {
     throw new Error("找不到打包目录 " + unpackedDir);
   }
-  const problems = [];
+  const noticeProblems = [];
+  const trayProblems = [];
   const asarPath = path.join(unpackedDir, "resources", "app.asar");
   const asar = loadAsar();
   for (const item of REQUIRED) {
     if (item.file) {
       const abs = path.join(unpackedDir, item.file);
-      if (!fs.existsSync(abs) || fs.statSync(abs).size < 20) problems.push(item.file);
+      if (!fs.existsSync(abs) || fs.statSync(abs).size < 20) noticeProblems.push(item.file);
       continue;
     }
-    if (!fs.existsSync(asarPath) || !asarHas(asar, asarPath, item.asar)) problems.push("app.asar/" + item.asar);
+    if (!fs.existsSync(asarPath) || !asarHas(asar, asarPath, item.asar)) noticeProblems.push("app.asar/" + item.asar);
   }
   for (const rel of TRAY_ASAR) {
-    if (!fs.existsSync(asarPath) || !asarHas(asar, asarPath, rel)) problems.push("app.asar/" + rel);
+    if (!fs.existsSync(asarPath) || !asarHas(asar, asarPath, rel)) trayProblems.push("app.asar/" + rel);
   }
-  if (problems.length) {
-    throw new Error("安装包缺少 NOTICE 中的文件：\n" + problems.join("\n"));
-  }
-  return problems;
+  const parts = [];
+  if (noticeProblems.length) parts.push("安装包缺少 NOTICE 中的文件：\n" + noticeProblems.join("\n"));
+  if (trayProblems.length) parts.push("安装包缺少托盘图标：\n" + trayProblems.join("\n"));
+  if (parts.length) throw new Error(parts.join("\n"));
+  return noticeProblems;
 }
 
 if (require.main === module) {

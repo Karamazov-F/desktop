@@ -114,7 +114,7 @@ async function send(textOverride) {
     addRow("bot", `${name}：${res?.text || "…"}`);
     if (res?.source && res.source !== "deepseek") {
       const note =
-        res.error || (res.source === "local" ? "来源：本地回复" : "已改用本地回复");
+        res.error || (res.source === "local" ? "来源：本地回复" : "这次先用本地回复");
       addRow("meta", note);
     }
     if (res?.usedVision) addRow("meta", "已查看屏幕，画面已发送");
@@ -142,18 +142,29 @@ inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") send().catch(console.error);
 });
 
+let voiceStartPromise = null;
 window.PetHoldTalk.bind(micBtn, {
   onDown() {
     window.petApi.setComposeHold?.(true);
   },
   onListen() {
-    window.petApi.voiceStart("hold").catch(console.error);
+    voiceStartPromise = window.petApi.voiceStart("hold");
+    Promise.resolve(voiceStartPromise).catch(console.error);
   },
   onSend() {
+    voiceStartPromise = null;
     window.petApi.voiceStop().catch(console.error);
   },
   onTooShort() {
-    window.petApi.voiceCancel?.().catch(console.error);
+    const pending = voiceStartPromise;
+    voiceStartPromise = null;
+    Promise.resolve(pending)
+      .then((res) => {
+        if (res && res.ok && res.sessionId !== undefined && res.sessionId !== null && res.sessionId !== "") {
+          return window.petApi.voiceCancel(res.sessionId);
+        }
+      })
+      .catch(console.error);
     window.petApi.floatText(window.PetHoldTalk.TOO_SHORT);
   },
 });

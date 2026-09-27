@@ -82,7 +82,7 @@ test("importFolder rejects a pack id outside the safe charset", () => {
   );
   fs.mkdirSync(imported);
 
-  assert.throws(() => packs.importFolder(src, imported), /id 不合法|非法/);
+  assert.throws(() => packs.importFolder(src, imported), /这个角色包无法使用，请向角色包作者重新获取/);
   assert.equal(fs.existsSync(path.join(parent, "escape")), false);
   assert.equal(fs.existsSync(path.join(imported, "escape")), false);
   assert.deepEqual(fs.readdirSync(imported), []);

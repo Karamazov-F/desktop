@@ -12,18 +12,29 @@ function setMicHot(on) {
 }
 
 function bindMic(btn) {
+  let voiceStartPromise = null;
   window.PetHoldTalk.bind(btn, {
     onDown() {
       window.petApi.setComposeHold?.(true);
     },
     onListen() {
-      window.petApi.voiceStart("hold").catch(console.error);
+      voiceStartPromise = window.petApi.voiceStart("hold");
+      Promise.resolve(voiceStartPromise).catch(console.error);
     },
     onSend() {
+      voiceStartPromise = null;
       window.petApi.voiceStop().catch(console.error);
     },
     onTooShort() {
-      window.petApi.voiceCancel?.().catch(console.error);
+      const pending = voiceStartPromise;
+      voiceStartPromise = null;
+      Promise.resolve(pending)
+        .then((res) => {
+          if (res && res.ok && res.sessionId !== undefined && res.sessionId !== null && res.sessionId !== "") {
+            return window.petApi.voiceCancel(res.sessionId);
+          }
+        })
+        .catch(console.error);
       window.petApi.floatText(window.PetHoldTalk.TOO_SHORT);
     },
   });

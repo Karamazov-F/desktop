@@ -324,7 +324,7 @@ test("an aborted turn does not call the network or capture the screen", async ()
   });
   assert.equal(result.source, "local-fallback");
   assert.equal(captured, false);
-  assert.match(result.error, /这次回复超时了，已改用本地回复/);
+  assert.match(result.error, /这次回复超时了，这次先用本地回复/);
   assert.doesNotMatch(result.error, /网络较慢/);
   assert.doesNotMatch(result.error, /Abort|timeout|Error/i);
 });
@@ -531,12 +531,14 @@ test("a stale voice cancel does not clear the newer session", () => {
   assert.equal(stale.ignored, true);
   assert.equal(gate.isBusy(), true);
   assert.equal(gate.current(), second.sessionId);
-  assert.equal(gate.cancel().cancelled, true);
+  assert.equal(gate.cancel(second.sessionId).cancelled, true);
   assert.equal(gate.isBusy(), false);
   const third = gate.begin();
   assert.equal(gate.cancel("").ignored, true);
+  assert.equal(gate.cancel(undefined).ignored, true);
   assert.equal(gate.cancel(null).ignored, true);
   assert.equal(gate.finish("").ignored, true);
+  assert.equal(gate.finish(undefined).ignored, true);
   assert.equal(gate.isBusy(), true);
   assert.equal(gate.cancel(third.sessionId).cancelled, true);
 });
@@ -554,27 +556,64 @@ test("an older microphone stop does not drop the newer recorder", () => {
   assert.equal(session.markStop(), null);
 });
 
+test("hold-to-talk cancel passes the session id", () => {
+  const root = path.join(__dirname, "..", "app", "renderer");
+  for (const name of ["chat.js", "compose.js"]) {
+    const src = fs.readFileSync(path.join(root, name), "utf8");
+    assert.match(src, /voiceCancel\(res\.sessionId\)/);
+    assert.doesNotMatch(src, /voiceCancel\?\.\(\)/);
+  }
+  const pet = fs.readFileSync(path.join(root, "pet.js"), "utf8");
+  const ipcFail = pet.slice(pet.indexOf("transcribeAudio"));
+  assert.match(ipcFail, /voiceCancel\?\.\(sessionId\)/);
+});
+
 test("model and microphone errors shown to the user are Chinese", () => {
   assert.equal(
     errors.userFacingError({ status: 401, message: "DeepSeek 401: invalid api key" }),
-    "API Key 无效，请到设置里重新填写"
+    "API Key 无效，请到设置里重新填写；这次先用本地回复"
   );
-  assert.equal(errors.userFacingError({ status: 403, message: "forbidden" }), "API Key 无效，请到设置里重新填写");
+  assert.equal(
+    errors.userFacingError({ status: 403, message: "forbidden" }),
+    "没有权限访问 DeepSeek，请检查账号状态；这次先用本地回复"
+  );
   const aborted = new Error("思考时间过长");
   aborted.name = "AbortError";
-  assert.equal(errors.userFacingError(aborted), "这次回复超时了，已改用本地回复");
-  assert.equal(errors.userFacingError(new Error("思考时间过长")), "这次回复超时了，已改用本地回复");
+  assert.equal(errors.userFacingError(aborted), "这次回复超时了，这次先用本地回复");
+  assert.equal(errors.userFacingError(new Error("思考时间过长")), "这次回复超时了，这次先用本地回复");
   assert.equal(
     errors.userFacingError(new Error("getaddrinfo ENOTFOUND api.deepseek.com")),
-    "连不上 DeepSeek，请检查网络，已改用本地回复"
+    "连不上 DeepSeek，请检查网络，这次先用本地回复"
   );
   assert.equal(
     errors.userFacingError({ status: 402, message: "Insufficient Balance" }),
     "DeepSeek 账户余额不足，请到 DeepSeek 开放平台充值；这次先用本地回复"
   );
-  assert.equal(errors.userFacingError({ status: 429, message: "rate limit" }), "请求太频繁，稍等一下再试");
-  assert.equal(errors.userFacingError(new Error("DeepSeek 500: boom")), "这次没能回复，请再试一次");
-  assert.equal(errors.userFacingError(new Error("request failed with status 401")), "这次没能回复，请再试一次");
+  assert.equal(errors.userFacingError({ status: 429, message: "rate limit" }), "请求太频繁，稍等一下再试；这次先用本地回复");
+  assert.equal(
+    errors.userFacingError(new Error("DeepSeek 500: boom")),
+    "这次没能从 DeepSeek 得到回复，这次先用本地回复"
+  );
+  assert.equal(
+    errors.userFacingError(new Error("request failed with status 401")),
+    "这次没能从 DeepSeek 得到回复，这次先用本地回复"
+  );
+  for (const sample of [
+    { status: 401, message: "invalid api key" },
+    { status: 403, message: "forbidden" },
+    { status: 429, message: "rate limit" },
+    { status: 402, message: "Insufficient Balance" },
+    aborted,
+    new Error("getaddrinfo ENOTFOUND api.deepseek.com"),
+    new Error("DeepSeek 500: boom"),
+    Object.assign(new Error("response body exceeded limit"), { code: "EMAXBODY" }),
+    new Error("missing api key"),
+  ]) {
+    const shown = errors.userFacingError(sample);
+    assert.match(shown, /本地回复/);
+    assert.match(shown, /这次先用本地回复/);
+    assert.doesNotMatch(shown, /这次没能回复，请再试一次/);
+  }
   assert.equal(
     errors.micFailureMessage({ name: "NotAllowedError" }),
     "麦克风权限被拒绝，请打开 设置 → 隐私和安全性 → 麦克风，开启“麦克风访问”和“允许桌面应用访问麦克风”"
@@ -587,12 +626,16 @@ test("model and microphone errors shown to the user are Chinese", () => {
   assert.equal(errors.TOO_EARLY, "没听清，按住稍久一点再说");
   assert.equal(errors.VOICE_PROCESS_FAILED, "语音处理出错，请再试一次");
   assert.equal(errors.sttFailureMessage(new Error("语音组件未随安装包提供，请重新安装桌宠。")), "语音组件损坏，请重新安装桌宠");
+  assert.equal(
+    errors.sttFailureMessage(new Error("ENOENT: no such file model.int8.onnx")),
+    "语音组件损坏，请重新安装桌宠"
+  );
+  assert.equal(errors.sttFailureMessage(new Error("ENOENT: open C:\\temp\\note.wav")), "语音识别出错，请再试一次");
   assert.equal(errors.sttFailureMessage(new Error("语音识别超时")), "识别超时，请再说一次");
   assert.equal(errors.sttFailureMessage(new Error("SenseVoice 启动超时")), "识别超时，请再说一次");
   assert.equal(errors.sttFailureMessage(new Error("sherpa worker exited")), "语音识别出错，请再试一次");
   const plain = errors.keyHintText({ keyStorage: "plaintext", deepseekApiKeyMasked: "sk-ab…wxyz" });
-  assert.match(plain, /明文/);
-  assert.match(plain, /不放心可以点“清除 API Key”/);
+  assert.equal(plain, "这台电脑不支持系统加密，Key 以明文保存在本机；不放心可以点“清除 API Key”。");
   assert.doesNotMatch(plain, /不明文存放/);
   const none = errors.keyHintText({ keyStorage: "none", encryptionAvailable: false });
   assert.doesNotMatch(none, /会用系统加密保存/);
@@ -603,7 +646,10 @@ test("model and microphone errors shown to the user are Chinese", () => {
     "系统加密不可用，无法保存 API Key。已保存：没有其他改动。未保存：API Key。"
   );
   assert.equal(errors.fieldLabel("notARealField"), "其他设置");
-  assert.equal(errors.userFacingError(Object.assign(new Error("response body exceeded limit"), { code: "EMAXBODY" })), "这次没能回复，请再试一次");
+  assert.equal(
+    errors.userFacingError(Object.assign(new Error("response body exceeded limit"), { code: "EMAXBODY" })),
+    "这次没能从 DeepSeek 得到回复，这次先用本地回复"
+  );
 });
 
 test("import failure restores a pack that was already there", () => {
@@ -617,10 +663,15 @@ test("import failure restores a pack that was already there", () => {
   fs.mkdirSync(imported, { recursive: true });
   const dest = path.join(imported, "ok.dpet");
   fs.writeFileSync(dest, Buffer.from("previous-good-pack"));
-  packs.armImportFailureForTest(() => {
-    throw new Error("角色包文件已损坏");
-  });
-  assert.throws(() => packs.importDpet(archive, imported, cache), /损坏/);
+  assert.throws(
+    () =>
+      packs.importDpet(archive, imported, cache, {
+        rmSync() {
+          throw new Error("导入中断");
+        },
+      }),
+    /导入中断/
+  );
   assert.equal(fs.readFileSync(dest, "utf8"), "previous-good-pack");
 });
 
@@ -634,7 +685,7 @@ test("rejected marker is only for permanent pack failures", () => {
   assert.equal(fs.existsSync(`${dest}.rejected`), false);
   const bad = path.join(parent, "bad.dpet");
   fs.writeFileSync(bad, Buffer.from("nope-not-a-pack"));
-  assert.throws(() => packs.readDpetPack(bad, cache), /不是有效的角色包文件/);
+  assert.throws(() => packs.readDpetPack(bad, cache), /这个角色包无法使用，请向角色包作者重新获取/);
   assert.equal(fs.existsSync(path.join(cache, packs.cacheKeyForDpet(bad)) + ".rejected"), true);
 
   const locked = path.join(parent, "locked.dpet");
@@ -691,10 +742,14 @@ test("startup clears leftover import and unpack directories", () => {
   fs.mkdirSync(path.join(cache, ".unpack-def"));
   fs.mkdirSync(path.join(cache, "keep-me"));
   fs.writeFileSync(path.join(cache, "old.dpet.bak-import"), "leftover");
+  fs.writeFileSync(path.join(cache, "half.dpet.partial"), "partial");
+  fs.writeFileSync(path.join(cache, "notes.partial"), "keep-other");
   packs.cleanStagingDirs(cache);
   assert.equal(fs.existsSync(path.join(cache, ".import-abc")), false);
   assert.equal(fs.existsSync(path.join(cache, ".unpack-def")), false);
   assert.equal(fs.existsSync(path.join(cache, "old.dpet.bak-import")), false);
+  assert.equal(fs.existsSync(path.join(cache, "half.dpet.partial")), false);
+  assert.equal(fs.existsSync(path.join(cache, "notes.partial")), true);
   assert.equal(fs.existsSync(path.join(cache, "keep-me")), true);
 });
 

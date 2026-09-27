@@ -41,14 +41,10 @@ function cleanStagingDirs(dir) {
       fs.rmSync(abs, { recursive: true, force: true });
       continue;
     }
-    if (ent.isFile() && ent.name.endsWith(".bak-import")) fs.rmSync(abs, { force: true });
+    if (ent.isFile() && (ent.name.endsWith(".bak-import") || ent.name.endsWith(".dpet.partial"))) {
+      fs.rmSync(abs, { force: true });
+    }
   }
-}
-
-let importFailureForTest = null;
-
-function armImportFailureForTest(fn) {
-  importFailureForTest = typeof fn === "function" ? fn : null;
 }
 
 function rememberPackFailure(dest, err) {
@@ -136,15 +132,17 @@ function readDpetPack(filePath, cacheDir) {
   return readPackDir(dest);
 }
 
-function importDpet(filePath, importedDir, cacheDir) {
-  const failAfterReplace = importFailureForTest;
-  importFailureForTest = null;
+function importDpet(filePath, importedDir, cacheDir, io) {
+  const copyFileSync = (io && io.copyFileSync) || fs.copyFileSync;
+  const renameSync = (io && io.renameSync) || fs.renameSync;
+  const rmSync = (io && io.rmSync) || fs.rmSync;
   ensureDir(importedDir);
   ensureDir(cacheDir);
   cleanStagingDirs(cacheDir);
   cleanStagingDirs(importedDir);
   const base = path.basename(filePath);
-  if (!isDpetFile(base) || base !== path.basename(base) || base.includes("..")) {
+  if (!isDpetFile(base)) throw new Error("请选择 .dpet 角色包文件");
+  if (base !== path.basename(base) || base.includes("..")) {
     throw new Error("角色包文件名不合法");
   }
   const destFile = resolveInside(importedDir, base);
@@ -156,18 +154,17 @@ function importDpet(filePath, importedDir, cacheDir) {
   try {
     decryptToDir(filePath, staging);
     const pack = readPackDir(staging);
-    if (!pack || !isSafePackId(pack.id)) throw new Error("角色包无效");
+    if (!pack || !isSafePackId(pack.id)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
     if (fs.existsSync(destFile)) {
-      fs.copyFileSync(destFile, backup);
+      copyFileSync(destFile, backup);
       hadPrevious = true;
     }
-    fs.copyFileSync(filePath, partialFile);
-    fs.renameSync(partialFile, destFile);
+    copyFileSync(filePath, partialFile);
+    renameSync(partialFile, destFile);
     replaced = true;
-    if (failAfterReplace) failAfterReplace();
     const cacheDest = path.join(cacheDir, cacheKeyForDpet(destFile));
-    fs.rmSync(cacheDest, { recursive: true, force: true });
-    fs.renameSync(staging, cacheDest);
+    rmSync(cacheDest, { recursive: true, force: true });
+    renameSync(staging, cacheDest);
     if (hadPrevious) fs.rmSync(backup, { force: true });
     return readPackDir(cacheDest);
   } catch (err) {
@@ -185,17 +182,17 @@ function importDpet(filePath, importedDir, cacheDir) {
 
 function importFolder(srcDir, importedDir) {
   const manifestPath = path.join(srcDir, "pack.json");
-  if (!fs.existsSync(manifestPath)) throw new Error("文件夹里没有有效的 pack.json / idle");
+  if (!fs.existsSync(manifestPath)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   let raw;
   try {
     raw = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   } catch {
-    throw new Error("文件夹里没有有效的 pack.json / idle");
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   }
   const id = (raw && raw.id) || path.basename(srcDir);
-  if (!isSafePackId(id)) throw new Error("角色包 id 不合法");
+  if (!isSafePackId(id)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   const pack = readPack(path.dirname(srcDir), path.basename(srcDir));
-  if (!pack || !isSafePackId(pack.id)) throw new Error("文件夹里没有有效的 pack.json / idle");
+  if (!pack || !isSafePackId(pack.id)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   const dest = resolveInside(importedDir, pack.id);
   copyDir(srcDir, dest);
   return readPack(importedDir, pack.id);
@@ -346,5 +343,4 @@ module.exports = {
   rememberPackFailure,
   cleanStagingDirs,
   rollbackImport,
-  armImportFailureForTest,
 };

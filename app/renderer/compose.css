@@ -153,10 +153,31 @@ body {
   transform: translateY(1px) scale(0.98);
   filter: brightness(0.96);
 }
-#compose-panel { position: absolute; top: 8px; left: 0; width: 100%; opacity: 0; pointer-events: none; transform: scaleX(0.24); transform-origin: var(--dock-x, 180px) center; transition: opacity 0.12s ease, transform 0.2s cubic-bezier(0.2, 0.9, 0.2, 1); }
-body.expanded #quick-actions { opacity: 0; pointer-events: none; transform: scaleX(0.35); }
-body.expanded #compose-panel { opacity: 1; pointer-events: auto; transform: scaleX(1); }
-@keyframes dock-in { from { opacity: 0; transform: translateY(-10px) scale(0.65); } to { opacity: 1; transform: translateY(0) scale(1); } }
+#compose-panel {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 100%;
+  opacity: 0;
+  pointer-events: none;
+  transform: scaleX(0.24);
+  transform-origin: var(--dock-x, 180px) center;
+  transition: opacity 0.12s ease, transform 0.2s cubic-bezier(0.2, 0.9, 0.2, 1);
+}
+body.expanded #quick-actions {
+  opacity: 0;
+  pointer-events: none;
+  transform: scaleX(0.35);
+}
+body.expanded #compose-panel {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scaleX(1);
+}
+@keyframes dock-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.65); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 @media (prefers-reduced-motion: reduce) {
   .btn, .quick-btn { transition: none; }
 }
