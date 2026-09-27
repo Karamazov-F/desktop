@@ -1,6 +1,8 @@
-/* LXGW WenKai (霞鹜文楷) Regular, subset for this app.
+/* LXGW WenKai (霞鹜文楷) Regular, full face (v1.522).
    Copyright 2021-2026 LXGW. SIL Open Font License 1.1.
-   See OFL-LXGWWenKai.txt in this folder. */
+   See OFL-LXGWWenKai.txt in this folder.
+   Chat text can contain any character; glyphs this face does not cover
+   (emoji, for example) fall through the stack below. */
 @font-face {
   font-family: "LXGW WenKai";
   font-style: normal;
@@ -26,5 +28,5 @@
 }
 
 :root {
-  --pet-ui-font: "LXGW WenKai", "Microsoft YaHei UI", sans-serif;
+  --pet-ui-font: "LXGW WenKai", "Microsoft YaHei", system-ui, "Segoe UI Emoji", sans-serif;
 }

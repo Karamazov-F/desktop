@@ -11,7 +11,7 @@
   --ok: #b9d8b1;
   --bad: #ffafa5;
   --titlebar: 42px;
-  --font: var(--pet-ui-font, "LXGW WenKai", "Microsoft YaHei UI", sans-serif);
+  --font: var(--pet-ui-font, "LXGW WenKai", "Microsoft YaHei", system-ui, "Segoe UI Emoji", sans-serif);
 }
 
 html {
