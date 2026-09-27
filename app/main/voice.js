@@ -1,6 +1,15 @@
 const agent = require("../lib/agent");
 const chatLog = require("../lib/chat-log");
+const { createVoiceGate } = require("../lib/voice-session");
 const { state, currentPack, loadSettings, userData } = require("./state");
+
+const gate = createVoiceGate();
+
+function sendRecord(payload) {
+  if (state.petWindow && !state.petWindow.isDestroyed()) {
+    state.petWindow.webContents.send("voice-record", payload);
+  }
+}
 
 function notifyVoice(next, extra = {}) {
   state.voicePhase = next;
@@ -63,36 +72,43 @@ async function handleTranscribedText(text, { autoSend = true } = {}) {
 }
 
 async function beginVoice(source = "hotkey") {
-  if (state.voiceBusy) return { ok: false, error: "busy" };
+  const started = gate.begin();
+  if (!started.ok) return started;
   state.voiceBusy = true;
+  state.voiceSession = started.sessionId;
   state.voiceSource = source === "hold" ? "hold" : "hotkey";
   state.composeVoicePin = true;
   const compose = require("./compose");
   compose.syncOutsideWatch();
   compose.openComposeWindow({ focus: false });
   notifyVoice("listening", { source: state.voiceSource });
-  if (state.petWindow && !state.petWindow.isDestroyed()) {
-    state.petWindow.webContents.send("voice-record", "start");
-  }
-  return { ok: true };
+  sendRecord({ cmd: "start", sessionId: started.sessionId });
+  return started;
 }
 
 async function endVoice() {
-  if (state.petWindow && !state.petWindow.isDestroyed()) {
-    state.petWindow.webContents.send("voice-record", "stop");
-  }
+  const sessionId = gate.current();
+  sendRecord({ cmd: "stop", sessionId });
   notifyVoice("transcribing");
-  return { ok: true };
+  return { ok: true, sessionId };
 }
 
-function cancelVoice() {
+function cancelVoice(sessionId) {
+  const result = gate.cancel(sessionId);
+  if (!result.ok) return result;
   state.voiceBusy = false;
   state.voiceHotkeyArmed = false;
-  if (state.petWindow && !state.petWindow.isDestroyed()) {
-    state.petWindow.webContents.send("voice-record", "cancel");
-  }
+  sendRecord({ cmd: "cancel", sessionId: result.sessionId });
   notifyVoice("idle", { cancelled: true });
-  return { ok: true };
+  return result;
+}
+
+function finishVoice(sessionId) {
+  const result = gate.finish(sessionId);
+  if (!result.ok) return result;
+  state.voiceBusy = false;
+  state.voiceHotkeyArmed = false;
+  return result;
 }
 
 function toggleVoiceHotkey() {
@@ -110,5 +126,6 @@ module.exports = {
   beginVoice,
   endVoice,
   cancelVoice,
+  finishVoice,
   toggleVoiceHotkey,
 };

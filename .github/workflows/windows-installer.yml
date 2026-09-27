@@ -22,7 +22,12 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            app/package-lock.json
+
+      - name: Install build tools
+        run: npm ci
 
       - name: Fetch pinned voice runtime
         run: node scripts/fetch-vendor.js
@@ -49,6 +54,9 @@ jobs:
             export CSC_KEY_PASSWORD="${CSC_KEY_PASSWORD_SECRET}"
           fi
           npx electron-builder --win nsis --x64
+
+      - name: Assert packaged license files
+        run: node scripts/assert-packaged-notices.js
 
       - name: Upload setup executable
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

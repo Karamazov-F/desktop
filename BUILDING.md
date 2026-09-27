@@ -2,12 +2,14 @@
 
 最终用户不需要这些步骤。安装包在 GitHub Actions 的 `Windows installer` 工作流里生成。
 
-本机编译需要 Node.js 18+。解压模型需要 Python 3，命令会依次尝试 `python3`、`python` 和 `py -3`。Python 只在打包时使用，不会打进安装包。`npm test` 用 Node 18 也能跑（`test/run.js` 列出测试文件，不依赖 Node 21 的 glob）。
+本机编译需要 Node.js 18+。解压模型用仓库根目录锁定的 Node 依赖（`unbzip2-stream`、`tar`、`yauzl`），不需要 Python。这些依赖只在打包时使用，不会打进安装包。`npm test` 用 Node 18 也能跑（`test/run.js` 列出测试文件，不依赖 Node 21 的 glob）。
 
 ```powershell
+npm ci
 node scripts/fetch-vendor.js
 cd app
 npm ci
+npm test
 npm run dist
 ```
 
@@ -23,6 +25,18 @@ npm run dist
 
 安装包输出在 `app/dist/桌宠-Setup-*.exe`。没有证书时不签名。要签名，设置 `CSC_LINK` 和 `CSC_KEY_PASSWORD`（工作流里对应同名 Actions secrets）。没有这两个变量时，`CSC_IDENTITY_AUTO_DISCOVERY=false`，生成未签名安装包。
 
-应用图标是 `app/build/icon.ico`（electron-builder 的 `win.icon`）。现在放的是占位图，换成正式图标后重新 `npm run dist` 即可。需要包含 256×256。
+应用图标和托盘图标由 `scripts/make-icons.js` 从一张正方形 PNG 生成。源图边长至少 1024。脚本写出多尺寸 `app/build/icon.ico` 和 `app/build/tray.ico`（16、24、32、48、64、128、256），以及 `app/build/tray.png`（16）和 `app/build/tray@2x.png`（32）。托盘会按 DPI 选用 1x / 2x，Windows 上优先用多尺寸 `tray.ico`。
+
+```powershell
+node scripts/make-icons.js --source path\to\icon.png
+```
+
+仓库里现在的图标是同一条流水线生成的占位图（灰底方块，不是角色或品牌），方便安装包在正式图到来之前也能清晰显示各个尺寸：
+
+```powershell
+node scripts/make-icons.js --placeholder
+```
+
+换成正式图后重新执行 `--source`，再 `npm run dist`。electron-builder 的 `win.icon` 指向 `app/build/icon.ico`。
 
 开发时可以 `cd app && npm start`。没有先执行 `fetch-vendor.js` 时，文字和动画仍然可用，语音会提示组件未随包提供。

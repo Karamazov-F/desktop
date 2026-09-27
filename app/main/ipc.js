@@ -129,7 +129,7 @@ function registerIpc() {
 
   ipcMain.handle("voice-start", async (_e, source) => require("./voice").beginVoice(source || "hotkey"));
   ipcMain.handle("voice-stop", async () => require("./voice").endVoice());
-  ipcMain.handle("voice-cancel", async () => require("./voice").cancelVoice());
+  ipcMain.handle("voice-cancel", async (_e, sessionId) => require("./voice").cancelVoice(sessionId));
 
   ipcMain.handle("transcribe-audio", async (_e, payload) => {
     const voice = require("./voice");
@@ -137,24 +137,23 @@ function registerIpc() {
     try {
       const bytes = payload?.data ? Buffer.from(payload.data) : Buffer.alloc(0);
       if (bytes.length < 200) {
-        state.voiceBusy = false;
-        voice.notifyVoice("idle");
+        const finished = voice.finishVoice(payload?.sessionId);
+        if (finished.ok) voice.notifyVoice("idle");
         return { ok: false, error: "too-short", text: "" };
       }
       const text = await stt.transcribeBuffer(bytes);
       const result = await voice.handleTranscribedText(text, {
         autoSend: payload?.autoSend !== false,
       });
-      state.voiceBusy = false;
-      state.voiceHotkeyArmed = false;
-      voice.notifyVoice("idle", { text: result.text });
+      const finished = voice.finishVoice(payload?.sessionId);
+      if (finished.ok) voice.notifyVoice("idle", { text: result.text });
       return { ok: true, ...result };
     } catch (err) {
-      state.voiceBusy = false;
-      state.voiceHotkeyArmed = false;
-      voice.notifyVoice("idle", { error: String(err.message || err) });
+      console.warn("transcribe failed", err && err.stack ? err.stack : err);
+      const finished = voice.finishVoice(payload?.sessionId);
+      if (finished.ok) voice.notifyVoice("idle", { error: "语音识别失败" });
       pet.sendPlay(null, "语音识别失败。");
-      return { ok: false, error: String(err.message || err), text: "" };
+      return { ok: false, error: "语音识别失败。", text: "" };
     }
   });
 

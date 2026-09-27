@@ -16,7 +16,7 @@ body {
   border-radius: 16px;
   background: rgba(42, 24, 28, 0.94);
   color: #fffaf7;
-  font: 15px/1.4 var(--pet-ui-font, "LXGW WenKai", "Microsoft YaHei", system-ui, "Segoe UI Emoji", sans-serif);
+  font: 15px/1.4 var(--pet-ui-font, "LXGW WenKai", "Microsoft YaHei", "Segoe UI Emoji", system-ui, sans-serif);
   box-shadow: 0 10px 28px rgba(40, 16, 20, 0.35);
 }
 

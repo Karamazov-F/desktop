@@ -61,8 +61,12 @@ async function chatCompletions({
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
   const onAbort = () => ac.abort();
-  if (signal) signal.addEventListener("abort", onAbort);
+  if (signal) {
+    if (signal.aborted) ac.abort();
+    else signal.addEventListener("abort", onAbort);
+  }
   let res;
+  let text;
   try {
     res = await fetch(url, {
       method: "POST",
@@ -73,17 +77,19 @@ async function chatCompletions({
       body: JSON.stringify(body),
       signal: ac.signal,
     });
+    text = await readAbortableText(res, ac.signal);
   } finally {
     clearTimeout(t);
     if (signal) signal.removeEventListener("abort", onAbort);
   }
 
-  const text = await res.text();
   let data;
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error(`DeepSeek 非 JSON 响应 (${res.status})`);
+    const e = new Error(`DeepSeek 非 JSON 响应 (${res.status})`);
+    e.status = res.status;
+    throw e;
   }
   if (!res.ok) {
     const err = data?.error?.message || text.slice(0, 400);
@@ -94,6 +100,41 @@ async function chatCompletions({
   }
   const parsed = extractMessage(data);
   return { ...parsed, raw: data };
+}
+
+function abortError() {
+  const err = new Error("思考时间过长");
+  err.name = "AbortError";
+  return err;
+}
+
+async function readAbortableText(res, signal) {
+  if (signal?.aborted) throw abortError();
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const text = await res.text();
+    if (signal?.aborted) throw abortError();
+    return text;
+  }
+  const reader = res.body.getReader();
+  const onAbort = () => {
+    reader.cancel(abortError()).catch(() => {});
+  };
+  if (signal) signal.addEventListener("abort", onAbort);
+  const chunks = [];
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (signal?.aborted) throw abortError();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+    }
+  } catch (err) {
+    if (signal?.aborted || err?.name === "AbortError") throw abortError();
+    throw err;
+  } finally {
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function chatCompletionsRetry(opts) {
@@ -116,4 +157,5 @@ module.exports = {
   chatCompletions,
   chatCompletionsRetry,
   extractMessage,
+  readAbortableText,
 };

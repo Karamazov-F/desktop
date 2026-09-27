@@ -3,6 +3,7 @@ const path = require("path");
 const { ensureDir } = require("./paths");
 const hotkeys = require("./hotkeys");
 const { isSafePackId } = require("./safe-path");
+const { formatKeySaveError } = require("./user-errors");
 
 const DEFAULT_BASE = "https://api.deepseek.com";
 const ALLOWED_API_HOSTS = new Set(["api.deepseek.com"]);
@@ -225,7 +226,7 @@ function saveSettings(userData, partial, opts = {}) {
   }
   const keyError = writeDisk(userData, next, opts);
   if (keyError && patch.deepseekApiKey) {
-    throw new Error("系统加密不可用，无法保存 API Key");
+    throw new Error(formatKeySaveError(Object.keys(patch)));
   }
   return loadSettings(userData, opts);
 }
@@ -236,6 +237,10 @@ function publicSettings(settings) {
   s.hasDeepseekKey = Boolean(key || s.deepseekApiKeyEnc);
   s.deepseekApiKeyMasked = key ? `${key.slice(0, 5)}…${key.slice(-4)}` : "";
   s.keyUnreadable = Boolean(s.deepseekApiKeyEnc && !key);
+  if (s.keyUnreadable) s.keyStorage = "unreadable";
+  else if (s.retainPlaintextKey && key) s.keyStorage = "plaintext";
+  else if (key || s.deepseekApiKeyEnc) s.keyStorage = "encrypted";
+  else s.keyStorage = "none";
   delete s.deepseekApiKey;
   delete s.deepseekApiKeyEnc;
   delete s.retainPlaintextKey;

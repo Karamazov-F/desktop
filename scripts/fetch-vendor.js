@@ -1,7 +1,9 @@
 /**
- * Download pinned Windows voice runtime files for the installer.
- * Nothing here runs inside the end-user app.
+ * Download and stage the pinned Windows voice runtime.
+ * Extraction uses the pinned Node packages in the repo-root lockfile
+ * (unbzip2-stream, tar, yauzl). Nothing here runs inside the end-user app.
  *
+ *   npm ci
  *   node scripts/fetch-vendor.js
  */
 const crypto = require("crypto");
@@ -9,7 +11,9 @@ const fs = require("fs");
 const http = require("http");
 const https = require("https");
 const path = require("path");
-const { spawnSync } = require("child_process");
+const bz2 = require("unbzip2-stream");
+const tar = require("tar");
+const yauzl = require("yauzl");
 
 const ROOT = path.join(__dirname, "..");
 const CACHE = path.join(ROOT, "app", "vendor", ".cache");
@@ -46,32 +50,12 @@ const ASSETS = {
     url: "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.22.1/LICENSE",
     sha256: "2f07c72751aed99790b8a4869cf2311df85a860b22ded05fa22803587a48922c",
   },
+  sensevoiceLicense: {
+    file: "sensevoice-apache-2.0-LICENSE",
+    url: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+    sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+  },
 };
-
-const PYTHON_CANDIDATES = [
-  { cmd: "python3", args: [] },
-  { cmd: "python", args: [] },
-  { cmd: "py", args: ["-3"] },
-];
-
-function pickPython(run) {
-  const probe =
-    run ||
-    ((candidate) => {
-      const result = spawnSync(
-        candidate.cmd,
-        [...candidate.args, "-c", "import sys; raise SystemExit(0 if sys.version_info[0] >= 3 else 1)"],
-        { encoding: "utf8" }
-      );
-      return result.status === 0;
-    });
-  for (const candidate of PYTHON_CANDIDATES) {
-    try {
-      if (probe(candidate)) return candidate;
-    } catch (_) {}
-  }
-  throw new Error("需要 Python 3 来解压语音模型。请确认 python3、python 或 py -3 可用。");
-}
 
 function sha256File(file) {
   return new Promise((resolve, reject) => {
@@ -127,95 +111,192 @@ async function ensureAsset(asset) {
   return dest;
 }
 
-function stage(paths) {
-  const script = `
-import json, shutil, sys, tarfile, zipfile
-from pathlib import Path
-spec = json.loads(sys.argv[1])
-voice = Path(spec["voice"])
-if voice.exists():
-    shutil.rmtree(voice)
-voice.mkdir(parents=True)
-modules = voice / "node_modules"
-modules.mkdir()
-lic = voice / "licenses"
-lic.mkdir()
+function isSafeArchivePath(name) {
+  const rel = String(name || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+  if (!rel || rel.startsWith("/") || /^[a-zA-Z]:/.test(rel)) return false;
+  const parts = rel.split("/");
+  return parts.length > 0 && parts.every((part) => part && part !== "." && part !== "..");
+}
 
-with zipfile.ZipFile(spec["nodeZip"]) as zf:
-    name = next(n for n in zf.namelist() if n.endswith("/node.exe") or n.endswith("node.exe"))
-    (voice / "node.exe").write_bytes(zf.read(name))
-    node_license = next(n for n in zf.namelist() if n.endswith("/LICENSE") and n.count("/") == 1)
-    (lic / "nodejs-LICENSE").write_bytes(zf.read(node_license))
-
-model_dir = voice / "models" / "sensevoice-small"
-model_dir.mkdir(parents=True)
-with tarfile.open(spec["modelArchive"], "r:bz2") as tf:
-    for member in tf.getmembers():
-        base = Path(member.name).name
-        if not member.isfile():
-            continue
-        if base in ("model.int8.onnx", "tokens.txt"):
-            src = tf.extractfile(member)
-            (model_dir / base).write_bytes(src.read())
-        elif base.lower() == "readme.md":
-            src = tf.extractfile(member)
-            (lic / "sensevoice-README.md").write_bytes(src.read())
-
-def untar_pkg(archive, dest_name):
-    dest = modules / dest_name
-    dest.mkdir()
-    with tarfile.open(archive, "r:gz") as tf:
-        for member in tf.getmembers():
-            if not member.isfile():
-                continue
-            rel = Path(member.name)
-            parts = rel.parts[1:]  # strip leading package/
-            if not parts or any(p in ("..", "") for p in parts):
-                raise SystemExit("unsafe path in " + archive)
-            out = dest.joinpath(*parts)
-            out.parent.mkdir(parents=True, exist_ok=True)
-            src = tf.extractfile(member)
-            out.write_bytes(src.read())
-
-untar_pkg(spec["sherpaNode"], "sherpa-onnx-node")
-untar_pkg(spec["sherpaWin"], "sherpa-onnx-win-x64")
-
-dll_dir = modules / "sherpa-onnx-win-x64"
-for dll in dll_dir.glob("*.dll"):
-    shutil.copy2(dll, voice / dll.name)
-
-shutil.copy2(spec["worker"], voice / "sherpa-stt-worker.js")
-needed = [
-    voice / "node.exe",
-    voice / "sherpa-stt-worker.js",
-    model_dir / "model.int8.onnx",
-    model_dir / "tokens.txt",
-    modules / "sherpa-onnx-node" / "sherpa-onnx.js",
-    dll_dir / "sherpa-onnx.node",
-    voice / "onnxruntime.dll",
-    lic / "nodejs-LICENSE",
-    lic / "sensevoice-README.md",
-]
-missing = [str(p) for p in needed if not p.exists()]
-if missing:
-    raise SystemExit("voice runtime incomplete:\\n" + "\\n".join(missing))
-print("staged", voice)
-`;
-  const spec = JSON.stringify({
-    voice: VOICE,
-    nodeZip: paths.nodeZip,
-    modelArchive: paths.modelArchive,
-    sherpaNode: paths.sherpaNode,
-    sherpaWin: paths.sherpaWin,
-    worker: path.join(ROOT, "app", "workers", "sherpa-stt-worker.js"),
+function readZipFiles(zipPath, want) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipPath, { lazyEntries: true }, (err, zip) => {
+      if (err) return reject(err);
+      let failed = false;
+      const fail = (error) => {
+        if (failed) return;
+        failed = true;
+        try {
+          zip.close();
+        } catch (_) {}
+        reject(error);
+      };
+      zip.on("error", fail);
+      zip.on("entry", (entry) => {
+        if (failed) return;
+        const name = String(entry.fileName || "");
+        const stripped = name.replace(/\/+$/, "");
+        if (stripped && !isSafeArchivePath(stripped)) {
+          fail(new Error("unsafe path in zip: " + name));
+          return;
+        }
+        if (name.endsWith("/")) {
+          zip.readEntry();
+          return;
+        }
+        let dest = null;
+        try {
+          dest = want(name);
+        } catch (error) {
+          fail(error);
+          return;
+        }
+        if (!dest) {
+          zip.readEntry();
+          return;
+        }
+        zip.openReadStream(entry, (streamErr, stream) => {
+          if (streamErr) return fail(streamErr);
+          fs.mkdirSync(path.dirname(dest), { recursive: true });
+          const out = fs.createWriteStream(dest);
+          stream.on("error", fail);
+          out.on("error", fail);
+          out.on("finish", () => {
+            if (!failed) zip.readEntry();
+          });
+          stream.pipe(out);
+        });
+      });
+      zip.on("end", () => {
+        if (!failed) resolve();
+      });
+      zip.readEntry();
+    });
   });
-  const python = pickPython();
-  const result = spawnSync(python.cmd, [...python.args, "-c", script, spec], { encoding: "utf8" });
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  if (result.status !== 0) {
-    throw new Error("failed to stage voice runtime");
+}
+
+function extractBz2Files(archive, pick) {
+  return new Promise((resolve, reject) => {
+    const parser = new tar.Parser({ strict: true });
+    let pending = 0;
+    let ended = false;
+    let failed = false;
+    const fail = (error) => {
+      if (failed) return;
+      failed = true;
+      reject(error);
+    };
+    const finish = () => {
+      if (!failed && ended && pending === 0) resolve();
+    };
+    parser.on("entry", (entry) => {
+      const name = String(entry.path || "");
+      if (!isSafeArchivePath(name)) {
+        entry.resume();
+        fail(new Error("unsafe path in archive: " + name));
+        return;
+      }
+      const base = name.replace(/\\/g, "/").split("/").pop();
+      const isFile = entry.type === "File" || entry.type === "0" || entry.type === "ContinuousFile";
+      const dest = isFile ? pick(base, name) : null;
+      if (!dest) {
+        entry.resume();
+        return;
+      }
+      pending += 1;
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      const out = fs.createWriteStream(dest);
+      out.on("finish", () => {
+        pending -= 1;
+        finish();
+      });
+      out.on("error", fail);
+      entry.on("error", fail);
+      entry.pipe(out);
+    });
+    parser.on("end", () => {
+      ended = true;
+      finish();
+    });
+    parser.on("error", fail);
+    fs.createReadStream(archive)
+      .on("error", fail)
+      .pipe(bz2())
+      .on("error", fail)
+      .pipe(parser);
+  });
+}
+
+async function extractPackage(archive, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  await tar.extract({
+    file: archive,
+    cwd: dest,
+    strip: 1,
+    strict: true,
+    filter(entryPath) {
+      const rel = String(entryPath || "");
+      if (!isSafeArchivePath(rel)) {
+        throw new Error("unsafe path in archive: " + rel);
+      }
+      return true;
+    },
+  });
+}
+
+async function stage(paths) {
+  fs.rmSync(VOICE, { recursive: true, force: true });
+  fs.mkdirSync(VOICE, { recursive: true });
+  const modules = path.join(VOICE, "node_modules");
+  const lic = path.join(VOICE, "licenses");
+  const modelDir = path.join(VOICE, "models", "sensevoice-small");
+  fs.mkdirSync(modules, { recursive: true });
+  fs.mkdirSync(lic, { recursive: true });
+  fs.mkdirSync(modelDir, { recursive: true });
+
+  await readZipFiles(paths.nodeZip, (name) => {
+    const norm = name.replace(/\\/g, "/");
+    if (norm.endsWith("/node.exe")) return path.join(VOICE, "node.exe");
+    const parts = norm.split("/");
+    if (parts.length === 2 && parts[1] === "LICENSE") return path.join(lic, "nodejs-LICENSE");
+    return null;
+  });
+
+  await extractBz2Files(paths.modelArchive, (base) => {
+    if (base === "model.int8.onnx" || base === "tokens.txt") return path.join(modelDir, base);
+    if (base.toLowerCase() === "readme.md") return path.join(lic, "sensevoice-README.md");
+    return null;
+  });
+
+  await extractPackage(paths.sherpaNode, path.join(modules, "sherpa-onnx-node"));
+  await extractPackage(paths.sherpaWin, path.join(modules, "sherpa-onnx-win-x64"));
+
+  const dllDir = path.join(modules, "sherpa-onnx-win-x64");
+  for (const name of fs.readdirSync(dllDir)) {
+    if (name.toLowerCase().endsWith(".dll")) {
+      fs.copyFileSync(path.join(dllDir, name), path.join(VOICE, name));
+    }
   }
+  fs.copyFileSync(path.join(ROOT, "app", "workers", "sherpa-stt-worker.js"), path.join(VOICE, "sherpa-stt-worker.js"));
+
+  const needed = [
+    path.join(VOICE, "node.exe"),
+    path.join(VOICE, "sherpa-stt-worker.js"),
+    path.join(modelDir, "model.int8.onnx"),
+    path.join(modelDir, "tokens.txt"),
+    path.join(modules, "sherpa-onnx-node", "sherpa-onnx.js"),
+    path.join(dllDir, "sherpa-onnx.node"),
+    path.join(VOICE, "onnxruntime.dll"),
+    path.join(lic, "nodejs-LICENSE"),
+    path.join(lic, "sensevoice-README.md"),
+  ];
+  const missing = needed.filter((file) => !fs.existsSync(file));
+  if (missing.length) {
+    throw new Error("voice runtime incomplete:\n" + missing.join("\n"));
+  }
+  console.log("staged", VOICE);
 }
 
 function installDownloadedLicenses(paths) {
@@ -223,9 +304,11 @@ function installDownloadedLicenses(paths) {
   fs.mkdirSync(dir, { recursive: true });
   fs.copyFileSync(paths.sherpaLicense, path.join(dir, "sherpa-onnx-LICENSE"));
   fs.copyFileSync(paths.onnxruntimeLicense, path.join(dir, "onnxruntime-LICENSE"));
+  fs.copyFileSync(paths.sensevoiceLicense, path.join(dir, "sensevoice-LICENSE"));
   for (const name of [
     "nodejs-LICENSE",
     "sensevoice-README.md",
+    "sensevoice-LICENSE",
     "sherpa-onnx-LICENSE",
     "onnxruntime-LICENSE",
   ]) {
@@ -241,15 +324,22 @@ async function main() {
   for (const [key, asset] of Object.entries(ASSETS)) {
     paths[key] = await ensureAsset(asset);
   }
-  stage(paths);
+  await stage(paths);
   installDownloadedLicenses(paths);
 }
 
 if (require.main === module) {
   main().catch((err) => {
-    console.error(err.message || err);
+    console.error(err && err.stack ? err.stack : err);
     process.exit(1);
   });
 }
 
-module.exports = { pickPython, PYTHON_CANDIDATES };
+module.exports = {
+  ASSETS,
+  isSafeArchivePath,
+  readZipFiles,
+  extractBz2Files,
+  extractPackage,
+  stage,
+};

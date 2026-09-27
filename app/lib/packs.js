@@ -4,11 +4,71 @@ const { decryptToDir, isDpetFile, COMPLETE_MARKER } = require("./dpet");
 const { ensureDir, packCacheDir } = require("./paths");
 const { isSafePackId, resolveInside } = require("./safe-path");
 
+const TRANSIENT_IO = new Set([
+  "ENOENT",
+  "EIO",
+  "ENOSPC",
+  "EACCES",
+  "EPERM",
+  "EBUSY",
+  "EMFILE",
+  "ENFILE",
+  "EROFS",
+  "EAGAIN",
+  "EBADF",
+  "EISDIR",
+  "UNKNOWN",
+]);
+
+function isPermanentPackError(err) {
+  const code = err && err.code;
+  if (code && TRANSIENT_IO.has(code)) return false;
+  return true;
+}
+
+function cleanStagingDirs(dir) {
+  if (!dir || !fs.existsSync(dir)) return;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (err) {
+    console.warn("clean staging", err.message);
+    return;
+  }
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    if (ent.name.startsWith(".import-") || ent.name.startsWith(".unpack-")) {
+      fs.rmSync(path.join(dir, ent.name), { recursive: true, force: true });
+    }
+  }
+}
+
+function rememberPackFailure(dest, err) {
+  fs.rmSync(dest, { recursive: true, force: true });
+  if (!isPermanentPackError(err)) return false;
+  try {
+    fs.writeFileSync(`${dest}.rejected`, String(err && err.message ? err.message : "rejected"));
+  } catch (_) {}
+  return true;
+}
+
+function rollbackImport({ destFile, partialFile, staging, backup, replaced, hadPrevious }) {
+  fs.rmSync(staging, { recursive: true, force: true });
+  fs.rmSync(partialFile, { force: true });
+  if (replaced) {
+    fs.rmSync(destFile, { force: true });
+    if (hadPrevious && backup && fs.existsSync(backup)) fs.renameSync(backup, destFile);
+  } else if (backup) {
+    fs.rmSync(backup, { force: true });
+  }
+}
+
 function listPacks(packsDir) {
   return listPacksFromDirs([packsDir]);
 }
 
 function listPacksFromDirs(dirs, { cacheDir } = {}) {
+  if (cacheDir) cleanStagingDirs(cacheDir);
   const byId = new Map();
   for (const dir of dirs.filter(Boolean)) {
     if (!fs.existsSync(dir)) continue;
@@ -60,19 +120,17 @@ function readDpetPack(filePath, cacheDir) {
         return null;
       }
     } catch (err) {
-      fs.rmSync(dest, { recursive: true, force: true });
-      try {
-        fs.writeFileSync(rejected, String(err.message || "rejected"));
-      } catch (_) {}
+      rememberPackFailure(dest, err);
       throw err;
     }
   }
   return readPackDir(dest);
 }
 
-function importDpet(filePath, importedDir, cacheDir) {
+function importDpet(filePath, importedDir, cacheDir, hooks = {}) {
   ensureDir(importedDir);
   ensureDir(cacheDir);
+  cleanStagingDirs(cacheDir);
   const base = path.basename(filePath);
   if (!isDpetFile(base) || base !== path.basename(base) || base.includes("..")) {
     throw new Error("角色包文件名不合法");
@@ -80,22 +138,35 @@ function importDpet(filePath, importedDir, cacheDir) {
   const destFile = resolveInside(importedDir, base);
   const staging = fs.mkdtempSync(path.join(cacheDir, ".import-"));
   const partialFile = `${destFile}.partial`;
+  const backup = `${destFile}.bak-import`;
   let replaced = false;
+  let hadPrevious = false;
   try {
     decryptToDir(filePath, staging);
     const pack = readPackDir(staging);
     if (!pack || !isSafePackId(pack.id)) throw new Error("角色包无效");
+    if (fs.existsSync(destFile)) {
+      fs.copyFileSync(destFile, backup);
+      hadPrevious = true;
+    }
     fs.copyFileSync(filePath, partialFile);
     fs.renameSync(partialFile, destFile);
     replaced = true;
+    if (typeof hooks.afterReplace === "function") hooks.afterReplace();
     const cacheDest = path.join(cacheDir, cacheKeyForDpet(destFile));
     fs.rmSync(cacheDest, { recursive: true, force: true });
     fs.renameSync(staging, cacheDest);
+    if (hadPrevious) fs.rmSync(backup, { force: true });
     return readPackDir(cacheDest);
   } catch (err) {
-    fs.rmSync(staging, { recursive: true, force: true });
-    fs.rmSync(partialFile, { force: true });
-    if (replaced) fs.rmSync(destFile, { force: true });
+    rollbackImport({
+      destFile,
+      partialFile,
+      staging,
+      backup: hadPrevious ? backup : null,
+      replaced,
+      hadPrevious,
+    });
     throw err;
   }
 }
@@ -258,4 +329,9 @@ module.exports = {
   importFolder,
   findPack,
   packCacheDir,
+  cacheKeyForDpet,
+  isPermanentPackError,
+  rememberPackFailure,
+  cleanStagingDirs,
+  rollbackImport,
 };

@@ -79,7 +79,7 @@ function need(buf, off, len) {
 
 function decodePayload(buf) {
   if (buf.length < 8 || buf.subarray(0, 4).toString("binary") !== PAYLOAD_MAGIC.toString("binary")) {
-    throw new Error("invalid dpet payload");
+    throw new Error("角色包文件已损坏");
   }
   const count = buf.readUInt32LE(4);
   if (count > MAX_ENTRIES) throw new Error("角色包文件过多，已拒绝导入");
@@ -152,7 +152,7 @@ function encryptFiles(files, destPath, meta = {}) {
 function encryptDir(dir, destPath, meta = {}) {
   const collected = collectFiles(dir);
   if (!collected.some((f) => f.rel === "pack.json")) {
-    throw new Error("pack.json missing");
+    throw new Error("角色包缺少 pack.json");
   }
   const rawJson = JSON.parse(fs.readFileSync(path.join(dir, "pack.json"), "utf8"));
   const files = collected.map((f) => ({
@@ -170,23 +170,33 @@ function encryptDir(dir, destPath, meta = {}) {
 function parseArchive(buf) {
   if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf);
   if (buf.length < 9 || buf.subarray(0, 4).toString("binary") !== MAGIC.toString("binary")) {
-    throw new Error("not a .dpet file");
+    throw new Error("不是有效的角色包文件");
   }
   const version = buf[4];
-  if (version !== VERSION) throw new Error(`unsupported dpet version ${version}`);
+  if (version !== VERSION) throw new Error("不支持的角色包版本");
   const headerLen = buf.readUInt32LE(5);
   let off = 9;
-  const header = JSON.parse(buf.subarray(off, off + headerLen).toString("utf8"));
+  let header;
+  try {
+    header = JSON.parse(buf.subarray(off, off + headerLen).toString("utf8"));
+  } catch {
+    throw new Error("角色包文件已损坏");
+  }
   off += headerLen;
   const iv = buf.subarray(off, off + 12);
   off += 12;
   const tag = buf.subarray(buf.length - 16);
   const ciphertext = buf.subarray(off, buf.length - 16);
-  const salt = Buffer.from(header.salt, "base64");
-  const key = deriveKey(salt);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  const gz = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  let gz;
+  try {
+    const salt = Buffer.from(header.salt, "base64");
+    const key = deriveKey(salt);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    gz = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  } catch {
+    throw new Error("角色包文件已损坏");
+  }
   const payload = gunzipLimited(gz);
   const files = decodePayload(payload);
   return { header, files };

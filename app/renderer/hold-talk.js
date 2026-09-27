@@ -2,7 +2,7 @@
    cancels; it does not run transcription or send. */
 (function () {
   const MIN_MS = 500;
-  const TOO_SHORT = "按键时间过短";
+  const TOO_SHORT = "没听清，按住稍久一点再说";
 
   function bind(button, hooks) {
     if (!button) return { cancel() {} };

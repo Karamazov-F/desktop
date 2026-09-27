@@ -1,10 +1,12 @@
-const path = require("path");
-const { app, Tray, Menu, nativeImage, globalShortcut } = require("electron");
+const fs = require("fs");
+const { app, Tray, Menu, nativeImage, globalShortcut, screen } = require("electron");
+const paths = require("../lib/paths");
+const { trayIconFiles, selectTrayAssets } = require("./tray-icon");
 const dialogue = require("../lib/dialogue");
 const hotkeys = require("../lib/hotkeys");
 const settingsLib = require("../lib/settings");
 const { ACTION_LABELS } = require("../lib/tools");
-const { state, BUNDLED_PACKS, appFile, loadSettings, saveSettings, allPacks } = require("./state");
+const { state, loadSettings, saveSettings, allPacks } = require("./state");
 
 function currentVoiceHotkey() {
   return hotkeys.normalize(loadSettings().voiceHotkey);
@@ -72,13 +74,38 @@ function notifySettings() {
   state.settingsWindow?.webContents.send("settings-changed", pub);
 }
 
+function loadTrayImage() {
+  const files = trayIconFiles(paths.appDir());
+  let scale = 1;
+  try {
+    scale = screen.getPrimaryDisplay().scaleFactor || 1;
+  } catch (_) {}
+  const choice = selectTrayAssets(files, {
+    platform: process.platform,
+    scaleFactor: scale,
+    exists: (file) => fs.existsSync(file),
+  });
+  let image = nativeImage.createEmpty();
+  if (choice.useIco) image = nativeImage.createFromPath(choice.ico);
+  if (image.isEmpty() && fs.existsSync(choice.primary)) {
+    image = nativeImage.createFromPath(choice.primary);
+  }
+  if (choice.includeHiDpi) {
+    if (choice.useIco && !image.isEmpty()) {
+      image.addRepresentation({ scaleFactor: 1, path: choice.png });
+      image.addRepresentation({ scaleFactor: 2, path: choice.png2x });
+      return image;
+    }
+    const layered = nativeImage.createFromPath(choice.png);
+    layered.addRepresentation({ scaleFactor: 2, path: choice.png2x });
+    if (!layered.isEmpty()) return layered;
+  }
+  if (image.isEmpty()) console.warn("tray icon missing", choice.primary);
+  return image;
+}
+
 function buildTray() {
-  const icon = nativeImage.createFromPath(appFile("tray.png"));
-  state.tray = new Tray(
-    icon.isEmpty()
-      ? nativeImage.createFromPath(path.join(BUNDLED_PACKS, "xiao-jing", "sprites", "idle_0.png"))
-      : icon
-  );
+  state.tray = new Tray(loadTrayImage());
   state.tray.on("click", () => {
     if (loadSettings().hidden) {
       toggleHidden();

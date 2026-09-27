@@ -26,13 +26,15 @@ function fill(s) {
     showHotkey($("hideHotkey"), s.hideHotkey);
     showHotkey($("voiceHotkey"), s.voiceHotkey);
   }
-  if (s.keyUnreadable) {
-    $("keyHint").textContent = "已保存的 Key 暂时无法读取。可以清除后重新填写。";
-  } else if (s.hasDeepseekKey) {
-    $("keyHint").textContent = `已保存 Key：${s.deepseekApiKeyMasked}（系统加密，不明文存放）`;
-  } else {
-    $("keyHint").textContent = "尚未保存 Key。Key 会用系统加密保存在本机。";
-  }
+  $("keyHint").textContent = window.PetUserErrors
+    ? window.PetUserErrors.keyHintText(s)
+    : s.keyUnreadable
+      ? "已保存的 Key 暂时无法读取。可以清除后重新填写。"
+      : s.keyStorage === "plaintext"
+        ? `已保存 Key：${s.deepseekApiKeyMasked}。系统加密不可用，这枚 Key 仍以明文留在本机。`
+        : s.hasDeepseekKey
+          ? `已保存 Key：${s.deepseekApiKeyMasked}（系统加密，不明文存放）`
+          : "尚未保存 Key。Key 会用系统加密保存在本机。";
 }
 
 function bindCapture(el) {

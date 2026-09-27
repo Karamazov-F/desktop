@@ -636,8 +636,15 @@ async function bootstrap() {
   const listenDot = document.getElementById("listen-dot");
   const mic = window.PetMicSession.create();
 
-  async function discardMic() {
-    const rec = mic.markCancel();
+  function recordOf(payload) {
+    if (payload && typeof payload === "object") {
+      return { cmd: payload.cmd, sessionId: payload.sessionId };
+    }
+    return { cmd: payload, sessionId: undefined };
+  }
+
+  async function discardMic(sessionId) {
+    const rec = mic.markCancel(sessionId);
     if (listenDot) listenDot.classList.remove("on");
     if (rec) {
       try {
@@ -646,8 +653,8 @@ async function bootstrap() {
     }
   }
 
-  async function startMic() {
-    const mine = mic.begin();
+  async function startMic(sessionId) {
+    const mine = mic.begin(sessionId);
     const rec = window.PetPcm.create();
     try {
       await rec.start();
@@ -662,38 +669,53 @@ async function bootstrap() {
         await rec.stop(false);
       } catch (_) {}
       try {
-        await window.petApi.voiceCancel?.();
+        await window.petApi.voiceCancel?.(sessionId);
       } catch (_) {}
       return;
     }
     if (listenDot) listenDot.classList.add("on");
   }
 
-  async function stopMicAndSend() {
-    const rec = mic.markStop();
+  async function stopMicAndSend(sessionId) {
+    const rec = mic.markStop(sessionId);
     if (listenDot) listenDot.classList.remove("on");
     if (!rec) {
       try {
-        await window.petApi.voiceCancel?.();
+        await window.petApi.voiceCancel?.(sessionId);
       } catch (_) {}
       return;
     }
     const buf = await rec.stop(true);
-    await window.petApi.transcribeAudio(buf, "audio/wav", true);
+    await window.petApi.transcribeAudio(buf, "audio/wav", true, sessionId);
   }
 
-  window.petApi.onVoiceRecord?.(async (cmd) => {
+  async function showMicProblem(err, sessionId, fallback) {
+    console.error(err);
+    if (listenDot) listenDot.classList.remove("on");
+    let ignored = false;
     try {
-      if (cmd === "start") await startMic();
-      if (cmd === "stop") await stopMicAndSend();
-      if (cmd === "cancel") await discardMic();
+      const res = await window.petApi.voiceCancel?.(sessionId);
+      ignored = Boolean(res && res.ignored);
+    } catch (cancelErr) {
+      console.error(cancelErr);
+    }
+    if (ignored) return;
+    const known = window.PetUserErrors?.micFailureMessage?.(err);
+    showBubble(known || fallback);
+  }
+
+  window.petApi.onVoiceRecord?.(async (payload) => {
+    const { cmd, sessionId } = recordOf(payload);
+    try {
+      if (cmd === "start") await startMic(sessionId);
+      if (cmd === "stop") await stopMicAndSend(sessionId);
+      if (cmd === "cancel") await discardMic(sessionId);
     } catch (err) {
-      console.error(err);
-      if (listenDot) listenDot.classList.remove("on");
-      if (cmd !== "stop") return;
-      try {
-        await window.petApi.transcribeAudio(new Uint8Array(0), "audio/wav", true);
-      } catch (_) {}
+      const fallback =
+        cmd === "stop"
+          ? window.PetUserErrors?.TOO_EARLY || "没听清，按住稍久一点再说"
+          : "没能打开麦克风，请检查系统麦克风设置";
+      await showMicProblem(err, sessionId, fallback);
     }
   });
 

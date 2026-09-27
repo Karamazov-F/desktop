@@ -30,12 +30,13 @@ contextBridge.exposeInMainWorld("petApi", {
   getWorkArea: () => ipcRenderer.invoke("get-work-area"),
   voiceStart: (source) => ipcRenderer.invoke("voice-start", source || "hotkey"),
   voiceStop: () => ipcRenderer.invoke("voice-stop"),
-  voiceCancel: () => ipcRenderer.invoke("voice-cancel"),
-  transcribeAudio: (bytes, mime, autoSend) =>
+  voiceCancel: (sessionId) => ipcRenderer.invoke("voice-cancel", sessionId),
+  transcribeAudio: (bytes, mime, autoSend, sessionId) =>
     ipcRenderer.invoke("transcribe-audio", {
       data: bytes,
       mime,
       autoSend,
+      sessionId,
     }),
   getChatLog: () => ipcRenderer.invoke("get-chat-log"),
   onPackChanged: (cb) => {

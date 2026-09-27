@@ -113,12 +113,16 @@ async function send(textOverride) {
     const name = res?.displayName || "桌宠";
     addRow("bot", `${name}：${res?.text || "…"}`);
     if (res?.source && res.source !== "deepseek") {
-      addRow("meta", res.error ? `回退本地（${res.error}）` : `来源：${res.source}`);
+      const note =
+        res.error || (res.source === "local" ? "来源：本地回复" : "已改用本地回复");
+      addRow("meta", note);
     }
     if (res?.usedVision) addRow("meta", "已查看屏幕，画面已发送");
   } catch (err) {
+    console.error(err);
     think.remove();
-    addRow("meta", String(err.message || err));
+    const text = window.PetUserErrors?.userFacingError?.(err) || "这次没能连上模型，已改用本地回复";
+    addRow("meta", text);
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();

@@ -1,4 +1,5 @@
 const dialogue = require("./dialogue");
+const { userFacingError } = require("./user-errors");
 const memory = require("./memory");
 const { chatCompletionsRetry } = require("./deepseek");
 const { describeScreenshot } = require("./vision");
@@ -222,6 +223,7 @@ async function runAgentTurn({
       break;
     }
   } catch (err) {
+    console.warn("agent turn failed", err && err.stack ? err.stack : err);
     source = "local-fallback";
     lastText = local.text;
     lastAction = local.action;
@@ -233,7 +235,7 @@ async function runAgentTurn({
       matched: local.matched,
       move: local.move || null,
       source,
-      error: String(err.message || err).slice(0, 240),
+      error: userFacingError(err),
       displayName,
     };
   } finally {

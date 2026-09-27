@@ -62,7 +62,7 @@ function start() {
       return allowAppAudio({
         permission,
         requestingUrl: details?.requestingUrl || requestingOrigin,
-        mediaTypes: details?.mediaTypes,
+        mediaType: details?.mediaType,
         appDir,
         isAppWindow: isAppContents(wc),
       });
