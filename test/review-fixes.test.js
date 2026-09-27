@@ -792,9 +792,10 @@ test("pinned unpackers extract zip, tar.gz, and bzip2 without leaving the archiv
 
 test("tray uses a packaged ico on Windows and png elsewhere", () => {
   const files = trayIconFiles("/app");
-  assert.match(files.ico, /assets\/tray\/tray\.ico$/);
-  assert.match(files.png2x, /assets\/tray\/tray@2x\.png$/);
-  assert.doesNotMatch(files.ico, /\/build\//);
+  const slash = (file) => file.replace(/\\/g, "/");
+  assert.match(slash(files.ico), /\/assets\/tray\/tray\.ico$/);
+  assert.match(slash(files.png2x), /\/assets\/tray\/tray@2x\.png$/);
+  assert.doesNotMatch(slash(files.ico), /\/build\//);
   const win = selectTrayAssets(
     { ico: "tray.ico", png: "tray.png", png2x: "tray@2x.png" },
     { platform: "win32", exists: () => true }
