@@ -1,5 +1,5 @@
 const dialogue = require("./dialogue");
-const { userFacingError } = require("./user-errors");
+const { userFacingError, annotateReply } = require("./user-errors");
 const memory = require("./memory");
 const { chatCompletionsRetry } = require("./deepseek");
 const { describeScreenshot } = require("./vision");
@@ -94,7 +94,7 @@ async function runAgentTurn({
   if (!settings.deepseekEnabled || !settings.deepseekApiKey) {
     if (local.action || local.move) applyPlay?.(local.action, local.text, local.move || null);
     else if (local.text) applyPlay?.(null, local.text);
-    return {
+    const reply = {
       text: local.text,
       action: local.action,
       matched: local.matched,
@@ -102,6 +102,8 @@ async function runAgentTurn({
       source: "local",
       displayName,
     };
+    if (settings.deepseekEnabled && !settings.deepseekApiKey) reply.reason = "missing-key";
+    return annotateReply(reply);
   }
 
   const visionOn = visionIsOn(settings, allowVision);
@@ -229,7 +231,7 @@ async function runAgentTurn({
     lastAction = local.action;
     if (local.action || local.move) applyPlay?.(local.action, local.text, local.move || null);
     else applyPlay?.(null, local.text);
-    return {
+    return annotateReply({
       text: lastText,
       action: lastAction,
       matched: local.matched,
@@ -237,7 +239,7 @@ async function runAgentTurn({
       source,
       error: userFacingError(err),
       displayName,
-    };
+    });
   } finally {
     clearTimeout(kill);
     if (signal) signal.removeEventListener("abort", onParentAbort);
@@ -265,7 +267,7 @@ async function runAgentTurn({
     memory.saveMemory(userData, pack.id, m);
   }
 
-  return {
+  return annotateReply({
     text: lastText,
     action: lastAction || (didMove || local.move ? local.action || "walk" : null),
     matched: true,
@@ -273,7 +275,7 @@ async function runAgentTurn({
     source,
     usedVision,
     displayName,
-  };
+  });
 }
 
 module.exports = {

@@ -1,37 +1,42 @@
-/* Body floater: a short hop onto the body center, then a still hold.
-   Not the speech bubble. Black fill, solid white outline, no glow.
-   20px up to center in 0.2s, then hold 1.8s.
+/* Fallback notes sit in the window, wrap, and stay up long enough to read.
    Positioning lives in pet.css so the page CSP can keep style-src 'self'. */
 (function () {
-  const RISE_MS = 2000;
-
-  function mount(host) {
+  function mount(host, opts) {
     let node = null;
     let token = 0;
 
+    function windowSize() {
+      const width = opts && opts.width ? opts.width() : host && host.clientWidth;
+      const height = opts && opts.height ? opts.height() : host && host.clientHeight;
+      return { width: width || 96, height: height || 352 };
+    }
+
     function show(text) {
       const label = String(text || "").trim();
-      if (!label || !host) return;
+      if (!label || !host || !window.PetNoteLayout) return;
       token += 1;
       const mine = token;
       if (node) {
         node.remove();
         node = null;
       }
+      const size = windowSize();
+      const plan = window.PetNoteLayout.fitPetNote(label, size.width, size.height);
       node = document.createElement("div");
       node.className = "pet-floater";
-      const span = document.createElement("span");
-      span.className = "pet-floater-text";
-      span.textContent = label;
-      node.appendChild(span);
+      for (const line of plan.lines) {
+        const span = document.createElement("span");
+        span.className = "pet-floater-line";
+        span.textContent = line;
+        node.appendChild(span);
+      }
       host.appendChild(node);
       const finish = () => {
         if (mine !== token || !node) return;
         node.remove();
         node = null;
       };
-      node.addEventListener("animationend", finish);
-      setTimeout(finish, RISE_MS + 200);
+      setTimeout(finish, plan.holdMs);
     }
 
     return { show };

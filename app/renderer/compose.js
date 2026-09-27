@@ -61,7 +61,7 @@ async function send() {
   sendBtn.disabled = true;
   try {
     const res = await window.petApi.chat(text);
-    if (res && res.source !== "deepseek" && res.error) setHint(res.error);
+    if (res && res.fallbackNote) setHint(res.fallbackNote);
     else if (res) setHint("");
   } catch (err) {
     console.error(err);
@@ -104,4 +104,8 @@ window.petApi.onVoiceState?.((s) => {
 });
 
 window.petApi.onComposeHint?.((text) => setHint(text));
+window.petApi.onComposeNote?.((payload) => {
+  expand();
+  setHint(payload?.text || "");
+});
 

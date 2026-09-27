@@ -55,7 +55,18 @@ body {
   color: #5c5c64;
   font-size: 12px;
   font-weight: 400;
+  line-height: 1.45;
   letter-spacing: 0.04em;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+body.expanded #hint:not(:empty) {
+  display: block;
+}
+body.expanded #card {
+  height: auto;
+  min-height: 68px;
 }
 #hint:empty {
   min-height: 0;

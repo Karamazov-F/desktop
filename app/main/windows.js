@@ -121,7 +121,8 @@ async function runChatter() {
         applyMove: (dir, dist) => pet.movePet(dir, dist),
       });
       if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
-      const note = require("../lib/user-errors").replyFallbackNote(res);
+      const { noteFromReply, chatterNoteIfFresh } = require("../lib/user-errors");
+      const note = chatterNoteIfFresh(noteFromReply(res));
       if (note) pet.floatText(note);
       return;
     } catch (_) {}
@@ -296,6 +297,7 @@ module.exports = {
   menuActions,
   openPetMenu,
   runChatter,
+  finishImportedPack,
   openChatWindow,
   revealPetChat,
   openSettingsWindow,

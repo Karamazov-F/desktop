@@ -13,6 +13,8 @@ const KEY_INVALID = "API Key 无效，请到设置里重新填写；这次先用
 const KEY_FORBIDDEN = "没有权限访问 DeepSeek，请检查账号状态；这次先用本地回复";
 const RATE_LIMIT = "请求太频繁，稍等一下再试；这次先用本地回复";
 const UNKNOWN_REPLY = "没能从 DeepSeek 得到回复；这次先用本地回复";
+const MISSING_KEY_NOTE = "还没填 DeepSeek Key，这次用本地回复";
+const SAME_NOTE_GAP_MS = 60000;
 
 const FIELD_LABELS = {
   deepseekEnabled: "DeepSeek",
@@ -129,9 +131,49 @@ function formatKeySaveError(savedKeys) {
   return `系统加密不可用，无法保存 API Key。已保存：${savedText}。未保存：API Key。`;
 }
 
+let missingKeyNoted = false;
+
 function replyFallbackNote(reply) {
   if (!reply || !reply.source || reply.source === "deepseek") return "";
-  return reply.error || (reply.source === "local" ? "来源：本地回复" : LOCAL_REPLY);
+  if (reply.reason === "missing-key") {
+    if (missingKeyNoted) return "";
+    missingKeyNoted = true;
+    return MISSING_KEY_NOTE;
+  }
+  if (!reply.error) return "";
+  return String(reply.error);
+}
+
+function annotateReply(reply) {
+  if (!reply || typeof reply !== "object") return reply;
+  reply.fallbackNote = replyFallbackNote(reply);
+  return reply;
+}
+
+function noteFromReply(reply) {
+  if (!reply) return "";
+  if (Object.prototype.hasOwnProperty.call(reply, "fallbackNote")) return reply.fallbackNote || "";
+  return replyFallbackNote(reply);
+}
+
+function createNoteGate(gapMs = SAME_NOTE_GAP_MS) {
+  const seen = new Map();
+  function noteIfFresh(note, now = Date.now()) {
+    const text = String(note || "");
+    if (!text) return "";
+    if (seen.has(text) && now - seen.get(text) < gapMs) return "";
+    seen.set(text, now);
+    return text;
+  }
+  noteIfFresh.reset = () => seen.clear();
+  return noteIfFresh;
+}
+
+const chatterNoteIfFresh = createNoteGate();
+
+function resetReplyNotices() {
+  missingKeyNoted = false;
+  chatterNoteIfFresh.reset();
 }
 
 function displaySaveError(err) {
@@ -148,6 +190,13 @@ const api = {
   NO_REPLY,
   TIMEOUT_REPLY,
   UNKNOWN_REPLY,
+  BALANCE_REPLY,
+  KEY_INVALID,
+  KEY_FORBIDDEN,
+  NETWORK_REPLY,
+  RATE_LIMIT,
+  MISSING_KEY_NOTE,
+  SAME_NOTE_GAP_MS,
   fieldLabel,
   userFacingError,
   micFailureMessage,
@@ -155,6 +204,11 @@ const api = {
   keyHintText,
   formatKeySaveError,
   replyFallbackNote,
+  annotateReply,
+  noteFromReply,
+  createNoteGate,
+  chatterNoteIfFresh,
+  resetReplyNotices,
   displaySaveError,
 };
 

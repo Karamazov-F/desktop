@@ -131,28 +131,32 @@ body::-webkit-scrollbar,
 @keyframes listening-pulse { 50% { box-shadow: 0 0 0 5px rgba(241, 156, 134, 0.18); } }
 .pet-floater {
   position: absolute;
-  left: 50%;
-  top: 50%;
+  left: 12px;
+  right: 12px;
+  top: 8px;
   z-index: 6;
   pointer-events: none;
-  transform: translate(-50%, -50%);
-  animation: pet-floater-rise 2s linear forwards;
+  max-width: calc(100% - 24px);
+  animation: pet-floater-in 0.2s ease-out both;
 }
-.pet-floater-text {
+.pet-floater-text,
+.pet-floater-line {
   display: block;
   color: #111;
   font: 700 16px/1.15 var(--pet-ui-font);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  text-align: center;
   letter-spacing: 0.02em;
   text-shadow:
     0 -2px 0 #fff, 0 2px 0 #fff, -2px 0 0 #fff, 2px 0 0 #fff,
     -2px -2px 0 #fff, 2px -2px 0 #fff, -2px 2px 0 #fff, 2px 2px 0 #fff,
     0 -1px 0 #fff, 0 1px 0 #fff, -1px 0 0 #fff, 1px 0 0 #fff;
 }
-@keyframes pet-floater-rise {
-  0% { transform: translate(-50%, calc(-50% + var(--rise, 20px))); opacity: 1; }
-  10% { transform: translate(-50%, -50%); opacity: 1; }
-  100% { transform: translate(-50%, -50%); opacity: 1; }
+@keyframes pet-floater-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .sprite-layer {

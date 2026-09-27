@@ -581,6 +581,7 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
   const userData = path.join(root, "user");
   fs.mkdirSync(userData);
   const electronEntry = require.resolve("electron", { paths: [path.join(__dirname, "..", "app")] });
+  const previousElectron = require.cache[electronEntry];
   require.cache[electronEntry] = {
     id: electronEntry,
     filename: electronEntry,
@@ -611,6 +612,7 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
   const windows = require("../app/main/windows");
   const { presentVoiceState } = require("../app/renderer/voice-present");
   const sent = [];
+  let composeClosed = 0;
   function track(name) {
     return {
       isDestroyed: () => false,
@@ -619,9 +621,17 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
       show() {},
       showInactive() {},
       focus() {},
-      close() {},
+      close() {
+        if (name !== "compose") return;
+        composeClosed += 1;
+        state.composeExpanded = false;
+        state.composeVoicePin = false;
+        state.composeNoteText = "";
+        state.composeNoteUntilLeave = false;
+      },
       setContentSize() {},
       setPosition() {},
+      setBounds() {},
       webContents: {
         send(channel, payload) {
           sent.push({ name, channel, payload });
@@ -644,6 +654,7 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
     assert.equal(started.ok, true);
     const result = await voice.handleTranscribedText("今天天气怎么样");
     voice.settleTranscribed(started.sessionId, result);
+    const notedAt = Date.now();
     const idle = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle" && e.payload.note);
     assert.equal(idle.length, 2);
     for (const event of idle) {
@@ -671,6 +682,48 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
     });
     assert.deepEqual(hints, ["", note, ""]);
     assert.deepEqual(floats, [note]);
+
+    const layout = require("../app/lib/note-layout");
+    const hold = layout.holdMs(note);
+    const elapsed = () => Date.now() - notedAt;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, 500 - elapsed())));
+    assert.equal(composeClosed, 0);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, hold - 400 - elapsed())));
+    assert.equal(composeClosed, 0);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, hold + 800 - elapsed())));
+    assert.equal(composeClosed, 1);
+
+    const compose = require("../app/main/compose");
+    state.composerHover = true;
+    compose.releaseComposeNoteHold();
+    assert.equal(composeClosed, 1);
+    state.composerHover = false;
+    compose.pointerLeftCompose();
+    assert.equal(composeClosed, 2);
+    state.composerHover = false;
+
+    agent.runAgentTurn = async () => ({ source: "local", text: "嗯", displayName: "小鲸" });
+    await voice.handleTranscribedText("在吗");
+    const localIdle = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").pop();
+    assert.equal(localIdle.payload.note || "", "");
+    assert.notEqual(localIdle.payload.note, "来源：本地回复");
+    const closedBeforeQuick = composeClosed;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.ok(composeClosed > closedBeforeQuick);
+
+    agent.runAgentTurn = async () => ({
+      source: "local",
+      text: "嗯",
+      displayName: "小鲸",
+      fallbackNote: "还没填 DeepSeek Key，这次用本地回复",
+    });
+    await voice.handleTranscribedText("你好");
+    const keyIdle = sent.filter((e) => e.name === "compose" && e.channel === "voice-state" && e.payload.note).pop();
+    assert.equal(keyIdle.payload.note, "还没填 DeepSeek Key，这次用本地回复");
+    const closedDuringKey = composeClosed;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(composeClosed, closedDuringKey);
+    compose.cancelComposeNoteHold();
 
     const element = () => ({
       classList: { toggle() {}, add() {}, remove() {} },
@@ -738,19 +791,388 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
       path.join(userData, "settings.json"),
       JSON.stringify({ deepseekEnabled: true, deepseekApiKey: "sk-test-key-1234", packId: "xiao-jing" })
     );
+    errors.resetReplyNotices();
+    agent.runAgentTurn = async () => ({
+      source: "local-fallback",
+      text: "嗯",
+      error: note,
+      displayName: "小鲸",
+    });
+    await windows.runChatter();
     await windows.runChatter();
     const chatterFloats = sent.filter((e) => e.name === "pet" && e.channel === "float-text");
     assert.deepEqual(chatterFloats.map((e) => e.payload), [note]);
+
+    const shown = [];
+    require.cache[electronEntry].exports.dialog.showMessageBox = (opts) => shown.push(opts);
+    state.tray = null;
+    windows.finishImportedPack({
+      id: "xiao-jing",
+      name: "小鲸",
+      persona: { displayName: "小鲸" },
+      size: { width: 64, height: 64 },
+    });
+    windows.finishImportedPack({
+      id: "whale-2",
+      persona: { displayName: "鲸" },
+      size: { width: 64, height: 64 },
+    });
+    windows.finishImportedPack({ id: "plain-pack", size: { width: 64, height: 64 } });
+    assert.deepEqual(
+      shown.map((item) => item.message),
+      ["已导入并切换到「小鲸」", "已导入并切换到「鲸」", "已导入并切换到「新角色」"]
+    );
+
+    const { packWindowSize } = require("../app/main/pet-window");
+    const narrow = packWindowSize({ size: { width: 1, height: 1 } });
+    const whale = packWindowSize({ size: { width: 256, height: 256 } });
+    assert.equal(whale.width, 288);
+    const longestNotes = [
+      errors.BALANCE_REPLY,
+      errors.KEY_FORBIDDEN,
+      errors.KEY_INVALID,
+      errors.NETWORK_REPLY,
+      errors.UNKNOWN_REPLY,
+      errors.RATE_LIMIT,
+      errors.TIMEOUT_REPLY,
+      errors.MISSING_KEY_NOTE,
+    ];
+    for (const text of longestNotes) {
+      const fit = layout.fitPetNote(text, narrow.width, narrow.height);
+      assert.equal(fit.lines.join(""), text);
+      assert.equal(fit.fits, true, text);
+      const wide = layout.fitPetNote(text, whale.width, whale.height);
+      assert.equal(wide.lines.join(""), text);
+      assert.equal(wide.fits, true, text);
+      const box = layout.composeNoteSize(text, 360);
+      assert.equal(box.lines.join(""), text);
+      assert.equal(box.fits, true);
+      assert.ok(box.height >= 68);
+    }
+    const petWin = require("../app/main/pet-window");
+    const uncut = errors.BALANCE_REPLY + errors.KEY_FORBIDDEN;
+    petWin.floatText(uncut);
+    assert.equal(sent.filter((e) => e.channel === "float-text").pop().payload, uncut);
+
+    const stt = "语音识别出错，请再试一次";
+    state.composeExpanded = false;
+    const again = await voice.beginVoice("hotkey");
+    voice.failTranscribe(again.sessionId, stt);
+    const sttIdle = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").pop();
+    assert.equal(sttIdle.payload.note, stt);
+    assert.equal(sttIdle.payload.error, undefined);
+    const closedAtStt = composeClosed;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.equal(composeClosed, closedAtStt);
+    const sttHints = [];
+    presentVoiceState({ state: "idle", error: stt }, {
+      setHint(text) {
+        sttHints.push(text);
+      },
+    });
+    assert.deepEqual(sttHints, [stt]);
   } finally {
     agent.runAgentTurn = originalTurn;
-    clearTimeout(state.composeHoverCloseTimer);
+    if (previousElectron) require.cache[electronEntry] = previousElectron;
+    else delete require.cache[electronEntry];
     delete global.document;
     delete global.window;
     state.petWindow = null;
     state.composeWindow = null;
     state.chatWindow = null;
     state.voiceBusy = false;
+    state.composeVoicePin = false;
+    state.composeNoteText = "";
+    state.composeNoteUntilLeave = false;
+    state.composerHover = false;
+    require("../app/main/compose").cancelComposeNoteHold();
   }
+});
+
+test("local mode stays quiet and a missing key is mentioned once", async () => {
+  errors.resetReplyNotices();
+  const pack = {
+    id: "xiao-jing",
+    name: "小鲸",
+    states: { idle: { frames: [] } },
+    dialogue: { fallback: ["嗯"] },
+    persona: { displayName: "小鲸" },
+  };
+  const userData = tmpDir();
+  const off = await agent.runAgentTurn({
+    pack,
+    settings: { deepseekEnabled: false, deepseekApiKey: "", memoryEnabled: false, visionEnabled: false },
+    userText: "你好",
+    userData,
+  });
+  assert.equal(off.source, "local");
+  assert.equal(off.fallbackNote, "");
+  assert.equal(off.error, undefined);
+  const first = await agent.runAgentTurn({
+    pack,
+    settings: { deepseekEnabled: true, deepseekApiKey: "", memoryEnabled: false, visionEnabled: false },
+    userText: "你好",
+    userData,
+  });
+  assert.equal(first.fallbackNote, "还没填 DeepSeek Key，这次用本地回复");
+  const second = await agent.runAgentTurn({
+    pack,
+    settings: { deepseekEnabled: true, deepseekApiKey: "", memoryEnabled: false, visionEnabled: false },
+    userText: "再来",
+    userData,
+  });
+  assert.equal(second.fallbackNote, "");
+  const gate = errors.createNoteGate(1000);
+  const network = errors.NETWORK_REPLY;
+  assert.equal(gate(network, 0), network);
+  assert.equal(gate(network, 500), "");
+  assert.equal(gate(errors.TIMEOUT_REPLY, 500), errors.TIMEOUT_REPLY);
+  assert.equal(gate(network, 1000), network);
+});
+
+test("a fallback note wraps inside the narrowest pet window and stays up", () => {
+  const vm = require("vm");
+  const layout = require("../app/lib/note-layout");
+  const text = errors.BALANCE_REPLY;
+  const delays = [];
+  const timers = [];
+  function makeEl() {
+    return {
+      className: "",
+      textContent: "",
+      children: [],
+      listeners: {},
+      appendChild(child) {
+        this.children.push(child);
+        child.parent = this;
+        return child;
+      },
+      remove() {
+        if (!this.parent) return;
+        this.parent.children = this.parent.children.filter((child) => child !== this);
+        this.parent = null;
+      },
+      addEventListener(type, fn) {
+        this.listeners[type] = fn;
+      },
+    };
+  }
+  const host = makeEl();
+  const sandbox = {
+    document: { createElement: () => makeEl() },
+    window: { PetNoteLayout: layout },
+    setTimeout(fn, ms) {
+      delays.push(ms);
+      const id = setTimeout(fn, ms);
+      timers.push(id);
+      return id;
+    },
+    clearTimeout,
+  };
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "app", "renderer", "floater.js"), "utf8"), vm.createContext(sandbox), {
+    filename: "floater.js",
+  });
+  const floater = sandbox.window.PetFloater.mount(host, {
+    width: () => 96,
+    height: () => 352,
+  });
+  try {
+    floater.show(text);
+    const node = host.children[0];
+    const lines = node.children.map((child) => child.textContent);
+    const plan = layout.fitPetNote(text, 96, 352);
+    assert.deepEqual(lines, plan.lines);
+    assert.equal(lines.join(""), text);
+    assert.equal(plan.fits, true);
+    assert.equal(delays[0], plan.holdMs);
+    assert.ok(delays[0] > 2000);
+    if (node.listeners.animationend) node.listeners.animationend();
+    assert.equal(host.children[0], node);
+  } finally {
+    for (const id of timers) clearTimeout(id);
+  }
+});
+
+test("chat and the compose bar show a fallback row only when there is a reason", async () => {
+  const vm = require("vm");
+  function element() {
+    const handlers = {};
+    return {
+      classList: { toggle() {}, add() {}, remove() {} },
+      addEventListener(type, fn) {
+        handlers[type] = fn;
+      },
+      click() {
+        return handlers.click && handlers.click();
+      },
+      keydown(event) {
+        return handlers.keydown && handlers.keydown(event);
+      },
+      style: { setProperty() {} },
+      textContent: "",
+      value: "",
+      focus() {},
+      disabled: false,
+      className: "",
+    };
+  }
+  const rows = [];
+  const log = {
+    appendChild(node) {
+      rows.push(node);
+    },
+    scrollTop: 0,
+    scrollHeight: 0,
+    replaceChildren() {
+      rows.length = 0;
+    },
+    querySelector() {
+      return null;
+    },
+  };
+  function rowEl() {
+    return { className: "", textContent: "", classList: { add() {} } };
+  }
+  const ids = {
+    log,
+    input: element(),
+    send: element(),
+    mic: element(),
+    who: element(),
+    hint: element(),
+  };
+  const turns = [];
+  const sandbox = {
+    console,
+    Promise,
+    document: {
+      getElementById(id) {
+        return ids[id] || element();
+      },
+      createElement() {
+        return rowEl();
+      },
+    },
+    window: {
+      petApi: {
+        getBootstrap: async () => ({ pack: { persona: { displayName: "小鲸" } }, settings: {}, chatLog: [] }),
+        onSettingsChanged() {},
+        onThinking() {},
+        onChatCleared() {},
+        onChatTurn(cb) {
+          turns.push(cb);
+        },
+        onVoiceState() {},
+        onVoiceTranscript() {},
+        setComposeHold() {},
+        voiceStart: async () => ({ ok: true, sessionId: 1 }),
+        voiceStop: async () => {},
+        voiceCancel: async () => {},
+        floatText() {},
+      },
+      PetHoldTalk: { bind() {}, TOO_SHORT: "短" },
+      PetUserErrors: errors,
+    },
+  };
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "app", "renderer", "chat.js"), "utf8"), vm.createContext(sandbox), {
+    filename: "chat.js",
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  turns[0]({
+    user: "你好",
+    reply: {
+      text: "嗯",
+      displayName: "小鲸",
+      source: "local-fallback",
+      error: "回复超时了；这次先用本地回复",
+    },
+  });
+  turns[0]({
+    user: "在吗",
+    reply: { text: "嗯", displayName: "小鲸", source: "local" },
+  });
+  turns[0]({
+    user: "再来",
+    reply: {
+      text: "嗯",
+      displayName: "小鲸",
+      source: "local",
+      reason: "missing-key",
+      fallbackNote: "",
+      usedVision: true,
+    },
+  });
+  const metas = rows.filter((row) => String(row.className).includes("meta")).map((row) => row.textContent);
+  assert.ok(metas.includes("回复超时了；这次先用本地回复"));
+  assert.equal(metas.includes("来源：本地回复"), false);
+  assert.equal(metas.includes("还没填 DeepSeek Key，这次用本地回复"), false);
+  assert.ok(metas.includes("已查看屏幕，画面已发送"));
+
+  const hintEl = element();
+  const inputEl = element();
+  const sendEl = element();
+  const composeIds = {
+    input: inputEl,
+    send: sendEl,
+    hint: hintEl,
+    card: element(),
+    "open-compose": element(),
+    "quick-mic": element(),
+    "field-mic": element(),
+  };
+  const composeSandbox = {
+    console,
+    Promise,
+    document: {
+      getElementById(id) {
+        return composeIds[id] || element();
+      },
+      body: { classList: { add() {}, remove() {} } },
+    },
+    window: {
+      petApi: {
+        onVoiceState() {},
+        onComposeLayout() {},
+        onComposeExpand() {},
+        onComposeHint() {},
+        onComposeNote(cb) {
+          composeSandbox.note = cb;
+        },
+        setComposeHover() {},
+        setComposeExpanded() {},
+        setComposeHold() {},
+        chat: async () => composeSandbox.nextReply,
+        floatText() {},
+        voiceStart: async () => ({ ok: false }),
+        voiceStop: async () => {},
+        voiceCancel: async () => {},
+      },
+      PetHoldTalk: { bind() {}, TOO_SHORT: "短" },
+      PetUserErrors: errors,
+      PetVoicePresent: require("../app/renderer/voice-present"),
+    },
+  };
+  vm.runInContext(
+    fs.readFileSync(path.join(__dirname, "..", "app", "renderer", "compose.js"), "utf8"),
+    vm.createContext(composeSandbox),
+    { filename: "compose.js" }
+  );
+  inputEl.value = "你好";
+  composeSandbox.nextReply = { text: "嗯", source: "local", fallbackNote: "" };
+  await sendEl.click();
+  assert.equal(hintEl.textContent, "");
+  inputEl.value = "你好";
+  composeSandbox.nextReply = {
+    text: "嗯",
+    source: "local",
+    fallbackNote: "还没填 DeepSeek Key，这次用本地回复",
+  };
+  await sendEl.click();
+  assert.equal(hintEl.textContent, "还没填 DeepSeek Key，这次用本地回复");
+  composeSandbox.document = composeSandbox.document;
+  composeSandbox.note({ text: errors.BALANCE_REPLY });
+  assert.equal(hintEl.textContent, errors.BALANCE_REPLY);
+  assert.equal(inputEl.value, "");
 });
 
 test("model and microphone errors shown to the user are Chinese", () => {
@@ -792,7 +1214,7 @@ test("model and microphone errors shown to the user are Chinese", () => {
     errors.replyFallbackNote({ source: "local-fallback", error: "回复超时了；这次先用本地回复" }),
     "回复超时了；这次先用本地回复"
   );
-  assert.equal(errors.replyFallbackNote({ source: "local", text: "嗯" }), "来源：本地回复");
+  assert.equal(errors.replyFallbackNote({ source: "local", text: "嗯" }), "");
   assert.equal(errors.replyFallbackNote({ source: "deepseek", error: "nope" }), "");
   for (const sample of [
     { status: 401, message: "invalid api key" },

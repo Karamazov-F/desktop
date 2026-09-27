@@ -7,6 +7,9 @@ const COMPOSE_PILL_SIZE = { width: 120, height: 76 };
 const COMPOSE_HOVER_CLOSE_MS = 400;
 
 function composeBox() {
+  if (state.composeExpanded && state.composeNoteText) {
+    return require("../lib/note-layout").composeNoteSize(state.composeNoteText, COMPOSE_SIZE.width);
+  }
   const size = state.composeExpanded ? COMPOSE_SIZE : COMPOSE_PILL_SIZE;
   return { width: size.width, height: size.height };
 }
@@ -68,6 +71,10 @@ function wireComposeWindow(win) {
     closeComposeWindow();
   });
   win.on("closed", () => {
+    clearTimeout(state.composeNoteHoldTimer);
+    state.composeNoteHoldTimer = null;
+    state.composeNoteText = "";
+    state.composeNoteUntilLeave = false;
     state.composeWindow = null;
     state.composerHover = false;
     state.composeExpanded = false;
@@ -128,6 +135,51 @@ function syncOutsideWatch() {
     if (cursorInsideWindow(state.composeWindow)) return;
     closeComposeWindow();
   });
+}
+
+function cancelComposeNoteHold() {
+  clearTimeout(state.composeNoteHoldTimer);
+  state.composeNoteHoldTimer = null;
+  state.composeNoteUntilLeave = false;
+  state.composeNoteText = "";
+}
+
+function holdComposeForNote(note) {
+  const text = String(note || "");
+  if (!text) return;
+  clearTimeout(state.composeHoverCloseTimer);
+  clearTimeout(state.composeNoteHoldTimer);
+  state.composeVoicePin = true;
+  state.composeNoteUntilLeave = false;
+  state.composeNoteText = text;
+  state.composeExpanded = true;
+  if (state.composeWindow && !state.composeWindow.isDestroyed()) {
+    positionComposeBesidePet();
+    if (!state.composeWindow.isVisible()) state.composeWindow.showInactive();
+    state.composeWindow.webContents.send("compose-note", { text });
+    syncOutsideWatch();
+  }
+  const wait = require("../lib/note-layout").holdMs(text);
+  state.composeNoteHoldTimer = setTimeout(() => releaseComposeNoteHold(), wait);
+}
+
+function releaseComposeNoteHold() {
+  state.composeNoteHoldTimer = null;
+  state.composeVoicePin = false;
+  if (state.composerHover || state.petComposeHover || cursorInsideWindow(state.composeWindow)) {
+    state.composeNoteUntilLeave = true;
+    return;
+  }
+  closeComposeWindow();
+}
+
+function pointerLeftCompose() {
+  if (state.composeNoteUntilLeave) {
+    state.composeNoteUntilLeave = false;
+    closeComposeWindow();
+    return;
+  }
+  scheduleComposeHoverClose();
 }
 
 function scheduleComposeHoverClose() {
@@ -257,6 +309,10 @@ module.exports = {
   syncOutsideWatch,
   armDismiss,
   scheduleComposeHoverClose,
+  holdComposeForNote,
+  cancelComposeNoteHold,
+  releaseComposeNoteHold,
+  pointerLeftCompose,
   prewarmComposeWindow,
   openComposeWindow,
   unstickHoldVoice,

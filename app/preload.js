@@ -72,6 +72,9 @@ contextBridge.exposeInMainWorld("petApi", {
   onComposeHint: (cb) => {
     ipcRenderer.on("compose-hint", (_e, text) => cb(text || ""));
   },
+  onComposeNote: (cb) => {
+    ipcRenderer.on("compose-note", (_e, payload) => cb(payload || {}));
+  },
   onFloatText: (cb) => {
     ipcRenderer.on("float-text", (_e, text) => cb(text || ""));
   },

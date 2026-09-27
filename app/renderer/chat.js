@@ -26,7 +26,9 @@ function addRow(cls, text) {
 }
 
 function addFallbackRow(reply) {
-  const note = window.PetUserErrors?.replyFallbackNote?.(reply);
+  let note = "";
+  if (reply && Object.prototype.hasOwnProperty.call(reply, "fallbackNote")) note = reply.fallbackNote || "";
+  else note = window.PetUserErrors?.replyFallbackNote?.(reply) || "";
   if (note) addRow("meta", note);
   if (reply?.usedVision) addRow("meta", "已查看屏幕，画面已发送");
 }

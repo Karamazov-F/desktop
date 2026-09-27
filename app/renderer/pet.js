@@ -625,7 +625,15 @@ async function bootstrap() {
     }
   });
 
-  const floater = window.PetFloater.mount(stage);
+  const floaterHost = document.getElementById("layout") || stage;
+  const floater = window.PetFloater.mount(floaterHost, {
+    width() {
+      return floaterHost.clientWidth || (currentPack?.size?.width || 64) + 32;
+    },
+    height() {
+      return floaterHost.clientHeight || 352;
+    },
+  });
   window.petApi.onFloatText?.((text) => floater.show(text));
   window.petApi.onShowBubble?.((text) => showBubble(text));
 

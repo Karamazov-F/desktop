@@ -1,6 +1,6 @@
 const agent = require("../lib/agent");
 const chatLog = require("../lib/chat-log");
-const { TOO_EARLY, replyFallbackNote } = require("../lib/user-errors");
+const { TOO_EARLY, noteFromReply } = require("../lib/user-errors");
 const { createVoiceGate, voiceReleaseTooSoon, MIN_VOICE_MS } = require("../lib/voice-session");
 const { state, currentPack, loadSettings, userData } = require("./state");
 
@@ -25,9 +25,12 @@ function notifyVoice(next, extra = {}) {
     state.composeWindow.webContents.send("voice-state", payload);
   }
   if (next === "idle") {
-    state.composeVoicePin = false;
     const compose = require("./compose");
-    compose.scheduleComposeHoverClose();
+    if (extra && extra.note) compose.holdComposeForNote(extra.note);
+    else {
+      state.composeVoicePin = false;
+      compose.scheduleComposeHoverClose();
+    }
     compose.syncOutsideWatch();
   }
 }
@@ -67,8 +70,8 @@ async function handleTranscribedText(text, { autoSend = true } = {}) {
     if (state.petWindow && !state.petWindow.isDestroyed()) {
       state.petWindow.webContents.send("voice-transcript", { reply: res });
     }
-    const note = replyFallbackNote(res);
-    notifyVoice("idle", { text: cleaned, note });
+    const note = noteFromReply(res);
+    notifyVoice("idle", note ? { text: cleaned, note } : { text: cleaned });
     return { text: cleaned, sent: true, reply: res, note, idleNotified: true };
   }
   return { text: cleaned, sent: false, idleNotified: false };
@@ -81,8 +84,9 @@ async function beginVoice(source = "hotkey") {
   state.voiceSession = started.sessionId;
   state.voiceStartedAt = Date.now();
   state.voiceSource = source === "hold" ? "hold" : "hotkey";
-  state.composeVoicePin = true;
   const compose = require("./compose");
+  compose.cancelComposeNoteHold();
+  state.composeVoicePin = true;
   compose.syncOutsideWatch();
   compose.openComposeWindow({ focus: false });
   notifyVoice("listening", { source: state.voiceSource });
@@ -120,10 +124,14 @@ function cancelVoice(sessionId) {
 function settleTranscribed(sessionId, result) {
   const finished = finishVoice(sessionId);
   if (finished.ok && !(result && result.idleNotified)) {
-    const extra = { text: (result && result.text) || "" };
-    if (result && result.note) extra.note = result.note;
-    notifyVoice("idle", extra);
+    notifyVoice("idle", { text: (result && result.text) || "" });
   }
+  return finished;
+}
+
+function failTranscribe(sessionId, message) {
+  const finished = finishVoice(sessionId);
+  if (finished.ok) notifyVoice("idle", { note: message });
   return finished;
 }
 
@@ -153,5 +161,6 @@ module.exports = {
   cancelVoice,
   finishVoice,
   settleTranscribed,
+  failTranscribe,
   toggleVoiceHotkey,
 };

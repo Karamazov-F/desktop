@@ -56,7 +56,7 @@ function resizePetToPack(pack, opts = {}) {
 }
 
 function floatText(text) {
-  const label = String(text || "").trim().slice(0, 120);
+  const label = String(text || "").trim();
   if (!label || !state.petWindow || state.petWindow.isDestroyed()) return;
   state.petWindow.webContents.send("float-text", label);
 }

@@ -146,9 +146,6 @@ function importDpet(filePath, importedDir, cacheDir, io) {
   cleanStagingDirs(importedDir);
   const base = path.basename(filePath);
   if (!isDpetFile(base)) throw new Error("请选择 .dpet 角色包文件");
-  if (base !== path.basename(base)) {
-    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
-  }
   const destFile = resolveInside(importedDir, base);
   const staging = fs.mkdtempSync(path.join(cacheDir, ".import-"));
   const partialFile = `${destFile}.partial`;

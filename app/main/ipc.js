@@ -150,8 +150,7 @@ function registerIpc() {
     } catch (err) {
       console.warn("transcribe failed", err && err.stack ? err.stack : err);
       const message = require("../lib/user-errors").sttFailureMessage(err);
-      const finished = voice.finishVoice(payload?.sessionId);
-      if (finished.ok) voice.notifyVoice("idle", { error: message });
+      voice.failTranscribe(payload?.sessionId, message);
       pet.sendPlay(null, message);
       return { ok: false, error: message, text: "" };
     }
@@ -190,14 +189,14 @@ function registerIpc() {
     const compose = require("./compose");
     state.petComposeHover = Boolean(hovered);
     if (state.petComposeHover) compose.openComposeWindow({ focus: false });
-    else compose.scheduleComposeHoverClose();
+    else compose.pointerLeftCompose();
   });
 
   ipcMain.on("compose-hover", (_e, hovered) => {
     const compose = require("./compose");
     state.composerHover = Boolean(hovered);
     if (state.composerHover) clearTimeout(state.composeHoverCloseTimer);
-    else compose.scheduleComposeHoverClose();
+    else compose.pointerLeftCompose();
   });
 
   ipcMain.on("compose-expanded", (_e, expanded) => {
