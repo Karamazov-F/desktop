@@ -1,6 +1,6 @@
 const agent = require("../lib/agent");
 const chatLog = require("../lib/chat-log");
-const { TOO_EARLY } = require("../lib/user-errors");
+const { TOO_EARLY, replyFallbackNote } = require("../lib/user-errors");
 const { createVoiceGate, voiceReleaseTooSoon, MIN_VOICE_MS } = require("../lib/voice-session");
 const { state, currentPack, loadSettings, userData } = require("./state");
 
@@ -38,7 +38,7 @@ async function handleTranscribedText(text, { autoSend = true } = {}) {
   if (!cleaned) {
     pet.sendPlay(null, "没听清，再说一次？");
     notifyVoice("idle", { error: "empty" });
-    return { text: "", sent: false };
+    return { text: "", sent: false, idleNotified: true };
   }
   if (state.chatWindow && !state.chatWindow.isDestroyed()) {
     state.chatWindow.webContents.send("voice-transcript", { text: cleaned });
@@ -67,9 +67,11 @@ async function handleTranscribedText(text, { autoSend = true } = {}) {
     if (state.petWindow && !state.petWindow.isDestroyed()) {
       state.petWindow.webContents.send("voice-transcript", { reply: res });
     }
-    return { text: cleaned, sent: true, reply: res };
+    const note = replyFallbackNote(res);
+    notifyVoice("idle", { text: cleaned, note });
+    return { text: cleaned, sent: true, reply: res, note, idleNotified: true };
   }
-  return { text: cleaned, sent: false };
+  return { text: cleaned, sent: false, idleNotified: false };
 }
 
 async function beginVoice(source = "hotkey") {
@@ -115,6 +117,16 @@ function cancelVoice(sessionId) {
   return result;
 }
 
+function settleTranscribed(sessionId, result) {
+  const finished = finishVoice(sessionId);
+  if (finished.ok && !(result && result.idleNotified)) {
+    const extra = { text: (result && result.text) || "" };
+    if (result && result.note) extra.note = result.note;
+    notifyVoice("idle", extra);
+  }
+  return finished;
+}
+
 function finishVoice(sessionId) {
   const result = gate.finish(sessionId);
   if (!result.ok) return result;
@@ -140,5 +152,6 @@ module.exports = {
   endVoice,
   cancelVoice,
   finishVoice,
+  settleTranscribed,
   toggleVoiceHotkey,
 };

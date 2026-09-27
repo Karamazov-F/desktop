@@ -100,8 +100,7 @@ bindMic(fieldMicBtn);
 // Color only while actually listening. Transcribing must not leave the
 // button hot — release already returned it to the idle look.
 window.petApi.onVoiceState?.((s) => {
-  setMicHot(s?.state === "listening");
-  if (s?.state !== "listening") setHint("");
+  window.PetVoicePresent.presentVoiceState(s, { setMicHot, setHint });
 });
 
 window.petApi.onComposeHint?.((text) => setHint(text));

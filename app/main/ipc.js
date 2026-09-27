@@ -145,8 +145,7 @@ function registerIpc() {
       const result = await voice.handleTranscribedText(text, {
         autoSend: payload?.autoSend !== false,
       });
-      const finished = voice.finishVoice(payload?.sessionId);
-      if (finished.ok) voice.notifyVoice("idle", { text: result.text });
+      voice.settleTranscribed(payload?.sessionId, result);
       return { ok: true, ...result };
     } catch (err) {
       console.warn("transcribe failed", err && err.stack ? err.stack : err);
@@ -218,9 +217,7 @@ function registerIpc() {
   });
 
   ipcMain.on("float-text", (_e, text) => {
-    const label = String(text || "").trim().slice(0, 48);
-    if (!label || !state.petWindow || state.petWindow.isDestroyed()) return;
-    state.petWindow.webContents.send("float-text", label);
+    require("./pet-window").floatText(text);
   });
 
   ipcMain.on("pet-drag-by", (_e, delta) => {
@@ -251,6 +248,7 @@ function registerIpc() {
     memory.clearAllMemory(userData());
     chatLog.clearAllChats(userData());
     agent.clearSessions();
+    require("./windows").clearLastImportDir();
     if (state.chatWindow && !state.chatWindow.isDestroyed()) {
       state.chatWindow.webContents.send("chat-cleared");
     }

@@ -55,6 +55,12 @@ function resizePetToPack(pack, opts = {}) {
   require("./compose").positionComposeBesidePet();
 }
 
+function floatText(text) {
+  const label = String(text || "").trim().slice(0, 120);
+  if (!label || !state.petWindow || state.petWindow.isDestroyed()) return;
+  state.petWindow.webContents.send("float-text", label);
+}
+
 function sendPlay(action, line, move) {
   if (!state.petWindow || state.petWindow.isDestroyed()) return;
   if (!action && !line && !move) return;
@@ -169,6 +175,7 @@ module.exports = {
   petBox,
   packWindowSize,
   resizePetToPack,
+  floatText,
   sendPlay,
   sendFacing,
   setPetPassthrough,

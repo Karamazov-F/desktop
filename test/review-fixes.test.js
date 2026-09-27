@@ -575,25 +575,182 @@ test("hold-to-talk cancel passes the session id", () => {
   assert.match(ipcFail, /voiceCancel\?\.\(sessionId\)/);
 });
 
-test("compose and chat show a fallback note when DeepSeek did not answer", () => {
-  const root = path.join(__dirname, "..", "app", "renderer");
-  const compose = fs.readFileSync(path.join(root, "compose.js"), "utf8");
-  assert.match(compose, /res\.source !== "deepseek" && res\.error/);
-  assert.match(compose, /setHint\(res\.error\)/);
-  assert.match(compose, /PetUserErrors\?\.NO_REPLY/);
-  assert.doesNotMatch(compose, /setHint\(String\(err\.message/);
-  const chat = fs.readFileSync(path.join(root, "chat.js"), "utf8");
-  const turn = chat.slice(chat.indexOf("onChatTurn"), chat.indexOf("onVoiceState"));
-  const voice = chat.slice(chat.indexOf("onVoiceTranscript"), chat.indexOf("async function send"));
-  assert.match(turn, /addFallbackRow\(reply\)/);
-  assert.match(voice, /addFallbackRow\(reply\)/);
-  assert.match(chat, /function addFallbackRow\(reply\)/);
-  const windows = fs.readFileSync(path.join(__dirname, "..", "app", "main", "windows.js"), "utf8");
-  assert.match(windows, /已导入并切换到「\$\{name\}」/);
-  assert.doesNotMatch(windows, /已导入 \$\{pack\.name\}（\$\{pack\.id\}）/);
-  assert.match(windows, /defaultPath/);
-  const folder = windows.slice(windows.indexOf("async function importPackFolder"));
-  assert.match(folder, /finishImportedPack\(pack\)/);
+test("a voice reply with chat closed still shows the fallback note", async () => {
+  const note = "回复超时了；这次先用本地回复";
+  const root = tmpDir();
+  const userData = path.join(root, "user");
+  fs.mkdirSync(userData);
+  const electronEntry = require.resolve("electron", { paths: [path.join(__dirname, "..", "app")] });
+  require.cache[electronEntry] = {
+    id: electronEntry,
+    filename: electronEntry,
+    loaded: true,
+    exports: {
+      app: { getPath: () => userData, isReady: () => true },
+      safeStorage: { isEncryptionAvailable: () => false },
+      BrowserWindow: function BrowserWindow() {},
+      screen: {
+        getPrimaryDisplay: () => ({
+          workArea: { x: 0, y: 0, width: 800, height: 600 },
+          workAreaSize: { width: 800, height: 600 },
+        }),
+        getCursorScreenPoint: () => ({ x: -1, y: -1 }),
+      },
+      dialog: {},
+      desktopCapturer: {},
+      ipcMain: { handle() {}, on() {} },
+      session: { defaultSession: {} },
+      globalShortcut: {},
+      Tray: function Tray() {},
+      Menu: { buildFromTemplate: () => ({}) },
+      nativeImage: {},
+    },
+  };
+  const { state } = require("../app/main/state");
+  const voice = require("../app/main/voice");
+  const windows = require("../app/main/windows");
+  const { presentVoiceState } = require("../app/renderer/voice-present");
+  const sent = [];
+  function track(name) {
+    return {
+      isDestroyed: () => false,
+      isVisible: () => false,
+      getBounds: () => ({ x: 10, y: 20, width: 128, height: 128 }),
+      show() {},
+      showInactive() {},
+      focus() {},
+      close() {},
+      setContentSize() {},
+      setPosition() {},
+      webContents: {
+        send(channel, payload) {
+          sent.push({ name, channel, payload });
+        },
+      },
+    };
+  }
+  state.chatWindow = null;
+  state.petWindow = track("pet");
+  state.composeWindow = track("compose");
+  const originalTurn = agent.runAgentTurn;
+  agent.runAgentTurn = async () => ({
+    source: "local-fallback",
+    text: "嗯",
+    error: note,
+    displayName: "小鲸",
+  });
+  try {
+    const started = await voice.beginVoice("hotkey");
+    assert.equal(started.ok, true);
+    const result = await voice.handleTranscribedText("今天天气怎么样");
+    voice.settleTranscribed(started.sessionId, result);
+    const idle = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle" && e.payload.note);
+    assert.equal(idle.length, 2);
+    for (const event of idle) {
+      assert.equal(event.payload.note, note);
+      assert.equal(event.payload.text, "今天天气怎么样");
+    }
+    assert.deepEqual(
+      idle.map((e) => e.name).sort(),
+      ["compose", "pet"]
+    );
+    assert.equal(sent.some((e) => e.name === "chat"), false);
+    const hints = [];
+    const floats = [];
+    presentVoiceState({ state: "transcribing" }, {
+      setHint(text) { hints.push(text); },
+      floatText(text) { floats.push(text); },
+    });
+    presentVoiceState(idle.find((e) => e.name === "compose").payload, {
+      setHint(text) { hints.push(text); },
+      floatText(text) { floats.push(text); },
+    });
+    presentVoiceState({ state: "idle" }, {
+      setHint(text) { hints.push(text); },
+      floatText(text) { floats.push(text); },
+    });
+    assert.deepEqual(hints, ["", note, ""]);
+    assert.deepEqual(floats, [note]);
+
+    const element = () => ({
+      classList: { toggle() {}, add() {}, remove() {} },
+      addEventListener() {},
+      style: { setProperty() {} },
+      textContent: "",
+      value: "",
+      focus() {},
+      disabled: false,
+    });
+    const hintEl = element();
+    hintEl.textContent = "stale";
+    const ids = {
+      input: element(),
+      send: element(),
+      hint: hintEl,
+      card: element(),
+      "open-compose": element(),
+      "quick-mic": element(),
+      "field-mic": element(),
+    };
+    global.document = {
+      getElementById(id) {
+        return ids[id] || element();
+      },
+      body: { classList: { add() {}, remove() {} } },
+    };
+    const voiceHandlers = [];
+    global.window = {
+      petApi: {
+        onVoiceState(cb) {
+          voiceHandlers.push(cb);
+        },
+        onComposeLayout() {},
+        onComposeExpand() {},
+        onComposeHint() {},
+        setComposeHover() {},
+        setComposeExpanded() {},
+        setComposeHold() {},
+      },
+      PetHoldTalk: { bind() {}, TOO_SHORT: "短" },
+      PetUserErrors: errors,
+      PetVoicePresent: { presentVoiceState },
+    };
+    require("../app/renderer/compose.js");
+    voiceHandlers[0]({ state: "transcribing" });
+    assert.equal(hintEl.textContent, "");
+    voiceHandlers[0]({ state: "idle", text: "今天天气怎么样", note });
+    assert.equal(hintEl.textContent, note);
+    voiceHandlers[0]({ state: "idle" });
+    assert.equal(hintEl.textContent, "");
+
+    const packsDir = path.join(root, "packs");
+    const folder = path.join(packsDir, "a-folder");
+    fs.mkdirSync(folder, { recursive: true });
+    windows.rememberChosenImport(path.join(packsDir, "猫猫..v2.dpet"));
+    windows.rememberChosenImport(folder);
+    const remembered = fs.readFileSync(path.join(userData, "last-import-dir.txt"), "utf8");
+    assert.equal(remembered, packsDir);
+    assert.notEqual(remembered, folder);
+    windows.clearLastImportDir();
+    assert.equal(fs.existsSync(path.join(userData, "last-import-dir.txt")), false);
+
+    fs.writeFileSync(
+      path.join(userData, "settings.json"),
+      JSON.stringify({ deepseekEnabled: true, deepseekApiKey: "sk-test-key-1234", packId: "xiao-jing" })
+    );
+    await windows.runChatter();
+    const chatterFloats = sent.filter((e) => e.name === "pet" && e.channel === "float-text");
+    assert.deepEqual(chatterFloats.map((e) => e.payload), [note]);
+  } finally {
+    agent.runAgentTurn = originalTurn;
+    clearTimeout(state.composeHoverCloseTimer);
+    delete global.document;
+    delete global.window;
+    state.petWindow = null;
+    state.composeWindow = null;
+    state.chatWindow = null;
+    state.voiceBusy = false;
+  }
 });
 
 test("model and microphone errors shown to the user are Chinese", () => {
@@ -820,15 +977,17 @@ test("a busy leftover file does not stop the pack list", () => {
   assert.match(warnings.join("\n"), /EBUSY/);
 });
 
-test("a pack file name with parent dots asks the author for a new pack", () => {
+test("a pack file whose name contains two dots still imports", () => {
   const parent = tmpDir();
+  const src = path.join(parent, "src");
+  packFixture(src, "ok-pack");
+  const archive = path.join(parent, "猫猫..v2.dpet");
+  dpet.encryptDir(src, archive);
   const imported = path.join(parent, "imported");
   const cache = path.join(parent, "cache");
-  fs.writeFileSync(path.join(parent, "bad..name.dpet"), "not-a-pack");
-  assert.throws(
-    () => packs.importDpet(path.join(parent, "bad..name.dpet"), imported, cache),
-    /这个角色包无法使用，请向角色包作者重新获取/
-  );
+  const pack = packs.importDpet(archive, imported, cache);
+  assert.equal(pack.id, "ok-pack");
+  assert.equal(fs.existsSync(path.join(imported, "猫猫..v2.dpet")), true);
 });
 
 test("response body stays tied to the abort signal", async () => {

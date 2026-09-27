@@ -742,10 +742,15 @@ async function bootstrap() {
   });
 
   window.petApi.onVoiceState?.((s) => {
-    if (listenDot) {
-      if (s?.state === "listening") listenDot.classList.add("on");
-      if (s?.state === "idle") listenDot.classList.remove("on");
-    }
+    window.PetVoicePresent.presentVoiceState(s, {
+      setListenDot(on) {
+        if (!listenDot) return;
+        listenDot.classList.toggle("on", on);
+      },
+      floatText(text) {
+        window.petApi.floatText(text);
+      },
+    });
   });
 
   window.petApi.onComposeFlag?.((on) => {

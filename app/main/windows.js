@@ -121,6 +121,8 @@ async function runChatter() {
         applyMove: (dir, dist) => pet.movePet(dir, dist),
       });
       if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
+      const note = require("../lib/user-errors").replyFallbackNote(res);
+      if (note) pet.floatText(note);
       return;
     } catch (_) {}
   }
@@ -202,6 +204,18 @@ function readLastImportDir() {
   return "";
 }
 
+function clearLastImportDir() {
+  try {
+    fs.rmSync(lastImportDirFile(), { force: true });
+  } catch (err) {
+    console.warn("clear import dir", err && err.message ? err.message : err);
+  }
+}
+
+function rememberChosenImport(chosen) {
+  writeLastImportDir(path.dirname(chosen));
+}
+
 function writeLastImportDir(dir) {
   if (!dir) return;
   try {
@@ -249,7 +263,7 @@ async function importPackDialog() {
   );
   if (picked.canceled || !picked.filePaths[0]) return;
   const chosen = picked.filePaths[0];
-  writeLastImportDir(path.dirname(chosen));
+  rememberChosenImport(chosen);
   try {
     finishImportedPack(importDpet(chosen, importedDir(), cacheDir()));
   } catch (err) {
@@ -266,7 +280,7 @@ async function importPackFolder() {
   );
   if (picked.canceled || !picked.filePaths[0]) return null;
   const chosen = picked.filePaths[0];
-  writeLastImportDir(chosen);
+  rememberChosenImport(chosen);
   try {
     const pack = importFolder(chosen, importedDir());
     finishImportedPack(pack);
@@ -287,4 +301,7 @@ module.exports = {
   openSettingsWindow,
   importPackDialog,
   importPackFolder,
+  clearLastImportDir,
+  rememberChosenImport,
+  readLastImportDir,
 };
