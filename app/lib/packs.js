@@ -36,11 +36,19 @@ function cleanStagingDirs(dir) {
     return;
   }
   for (const ent of entries) {
-    if (!ent.isDirectory()) continue;
-    if (ent.name.startsWith(".import-") || ent.name.startsWith(".unpack-")) {
-      fs.rmSync(path.join(dir, ent.name), { recursive: true, force: true });
+    const abs = path.join(dir, ent.name);
+    if (ent.isDirectory() && (ent.name.startsWith(".import-") || ent.name.startsWith(".unpack-"))) {
+      fs.rmSync(abs, { recursive: true, force: true });
+      continue;
     }
+    if (ent.isFile() && ent.name.endsWith(".bak-import")) fs.rmSync(abs, { force: true });
   }
+}
+
+let importFailureForTest = null;
+
+function armImportFailureForTest(fn) {
+  importFailureForTest = typeof fn === "function" ? fn : null;
 }
 
 function rememberPackFailure(dest, err) {
@@ -71,6 +79,7 @@ function listPacksFromDirs(dirs, { cacheDir } = {}) {
   if (cacheDir) cleanStagingDirs(cacheDir);
   const byId = new Map();
   for (const dir of dirs.filter(Boolean)) {
+    cleanStagingDirs(dir);
     if (!fs.existsSync(dir)) continue;
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       if (ent.name.startsWith(".") || ent.name === "_author") continue;
@@ -127,10 +136,13 @@ function readDpetPack(filePath, cacheDir) {
   return readPackDir(dest);
 }
 
-function importDpet(filePath, importedDir, cacheDir, hooks = {}) {
+function importDpet(filePath, importedDir, cacheDir) {
+  const failAfterReplace = importFailureForTest;
+  importFailureForTest = null;
   ensureDir(importedDir);
   ensureDir(cacheDir);
   cleanStagingDirs(cacheDir);
+  cleanStagingDirs(importedDir);
   const base = path.basename(filePath);
   if (!isDpetFile(base) || base !== path.basename(base) || base.includes("..")) {
     throw new Error("角色包文件名不合法");
@@ -152,7 +164,7 @@ function importDpet(filePath, importedDir, cacheDir, hooks = {}) {
     fs.copyFileSync(filePath, partialFile);
     fs.renameSync(partialFile, destFile);
     replaced = true;
-    if (typeof hooks.afterReplace === "function") hooks.afterReplace();
+    if (failAfterReplace) failAfterReplace();
     const cacheDest = path.join(cacheDir, cacheKeyForDpet(destFile));
     fs.rmSync(cacheDest, { recursive: true, force: true });
     fs.renameSync(staging, cacheDest);
@@ -334,4 +346,5 @@ module.exports = {
   rememberPackFailure,
   cleanStagingDirs,
   rollbackImport,
+  armImportFailureForTest,
 };

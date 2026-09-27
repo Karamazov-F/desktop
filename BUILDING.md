@@ -2,7 +2,9 @@
 
 最终用户不需要这些步骤。安装包在 GitHub Actions 的 `Windows installer` 工作流里生成。
 
-本机编译需要 Node.js 18+。解压模型用仓库根目录锁定的 Node 依赖（`unbzip2-stream`、`tar`、`yauzl`），不需要 Python。这些依赖只在打包时使用，不会打进安装包。`npm test` 用 Node 18 也能跑（`test/run.js` 列出测试文件，不依赖 Node 21 的 glob）。
+本机编译需要 Node.js 18+。解压模型用仓库根目录锁定的开发依赖（`unbzip2-stream`、`tar`、`yauzl`、`sharp`），不需要 Python。这些依赖只在打包时使用，不会打进安装包。`npm test` 用 Node 18 也能跑（`test/run.js` 列出测试文件，不依赖 Node 21 的 glob）。
+
+`unbzip2-stream` 1.4.3 已无人维护，仍用它是因为它是纯 JavaScript、按流解码，能处理约 159MB 的模型 tar.bz2。npm 上的 `seek-bzip`、`compressjs` 同样停更，而且会把解压结果整段放进内存。仍在维护的 bzip2 包是 WebAssembly，不是纯 JavaScript。因此继续锁定 `unbzip2-stream@1.4.3`，并用 `test/fixtures/model-mini.tar.bz2` 覆盖解压。
 
 ```powershell
 npm ci
@@ -25,7 +27,7 @@ npm run dist
 
 安装包输出在 `app/dist/桌宠-Setup-*.exe`。没有证书时不签名。要签名，设置 `CSC_LINK` 和 `CSC_KEY_PASSWORD`（工作流里对应同名 Actions secrets）。没有这两个变量时，`CSC_IDENTITY_AUTO_DISCOVERY=false`，生成未签名安装包。
 
-应用图标和托盘图标由 `scripts/make-icons.js` 从一张正方形 PNG 生成。源图边长至少 1024。脚本写出多尺寸 `app/build/icon.ico` 和 `app/build/tray.ico`（16、24、32、48、64、128、256），以及 `app/build/tray.png`（16）和 `app/build/tray@2x.png`（32）。托盘会按 DPI 选用 1x / 2x，Windows 上优先用多尺寸 `tray.ico`。
+应用图标和托盘图标由 `scripts/make-icons.js` 从一张正方形 PNG 生成。源图边长至少 1024。脚本写出 `app/build/icon.ico`（安装包和窗口图标）以及 `app/assets/tray/tray.ico`、`tray.png`、`tray@2x.png`。托盘文件放在 `assets/tray/`，不放在 `build/`，否则 electron-builder 会把 `build/` 当成 buildResources，不打进安装包。`tray.ico` 含 16、20、24、32、40、48、64、128、256，其中 20 和 40 对应 Windows 125% 与 150%。Windows 托盘只提交这枚多尺寸 ico。其他系统用 `tray.png`，Electron 会自行带上旁边的 `tray@2x.png`。显示器缩放变化时会重新设置托盘图。文件缺失时用一块中性灰的生成图，不是角色图。
 
 ```powershell
 node scripts/make-icons.js --source path\to\icon.png

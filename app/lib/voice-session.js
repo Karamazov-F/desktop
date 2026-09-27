@@ -3,8 +3,11 @@ function createVoiceGate() {
   let busy = false;
 
   function matches(sessionId) {
-    if (sessionId == null || sessionId === "") return true;
-    return Number(sessionId) === session;
+    if (sessionId === undefined) return true;
+    if (sessionId === null || sessionId === "") return false;
+    const id = Number(sessionId);
+    if (!Number.isInteger(id)) return false;
+    return id === session;
   }
 
   function begin() {
@@ -39,4 +42,11 @@ function createVoiceGate() {
   };
 }
 
-module.exports = { createVoiceGate };
+const MIN_VOICE_MS = 500;
+
+function voiceReleaseTooSoon(source, startedAt, now = Date.now()) {
+  if (source !== "hotkey" || !startedAt) return false;
+  return now - startedAt < MIN_VOICE_MS;
+}
+
+module.exports = { createVoiceGate, voiceReleaseTooSoon, MIN_VOICE_MS };

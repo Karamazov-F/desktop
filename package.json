@@ -5,8 +5,8 @@
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {
-    "sharp": "0.34.4",
+  "devDependencies": {
+    "sharp": "0.35.4",
     "tar": "7.5.22",
     "unbzip2-stream": "1.4.3",
     "yauzl": "3.4.0"

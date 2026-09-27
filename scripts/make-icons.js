@@ -9,18 +9,22 @@
  * the real artwork is ready. Source must be a square PNG at least 1024px.
  *
  * Writes:
- *   app/build/icon.ico     16, 24, 32, 48, 64, 128, 256
- *   app/build/tray.ico     the same sizes
- *   app/build/tray.png     16x16
- *   app/build/tray@2x.png  32x32
+ *   app/build/icon.ico          installer / window icon
+ *   app/assets/tray/tray.ico    tray icon, including 20 and 40 for 125% / 150%
+ *   app/assets/tray/tray.png    16x16 (other platforms; Electron loads @2x beside it)
+ *   app/assets/tray/tray@2x.png 32x32
+ *
+ * Tray files live outside build/ so electron-builder does not treat them as
+ * buildResources and drop them from the packaged app.
  */
 const fs = require("fs");
 const path = require("path");
 const sharp = require("sharp");
 
 const ROOT = path.join(__dirname, "..");
-const OUT_DIR = path.join(ROOT, "app", "build");
-const ICON_SIZES = [16, 24, 32, 48, 64, 128, 256];
+const ICON_DIR = path.join(ROOT, "app", "build");
+const TRAY_DIR = path.join(ROOT, "app", "assets", "tray");
+const ICON_SIZES = [16, 20, 24, 32, 40, 48, 64, 128, 256];
 const MIN_SOURCE = 1024;
 
 function pngSize(buffer) {
@@ -104,18 +108,19 @@ async function buildFromSource(source) {
   for (const size of ICON_SIZES) {
     rendered.push({ width: size, height: size, png: await pngAt(source, size) });
   }
-  fs.mkdirSync(OUT_DIR, { recursive: true });
+  fs.mkdirSync(ICON_DIR, { recursive: true });
+  fs.mkdirSync(TRAY_DIR, { recursive: true });
   const ico = toIco(rendered);
-  fs.writeFileSync(path.join(OUT_DIR, "icon.ico"), ico);
-  fs.writeFileSync(path.join(OUT_DIR, "tray.ico"), ico);
+  fs.writeFileSync(path.join(ICON_DIR, "icon.ico"), ico);
+  fs.writeFileSync(path.join(TRAY_DIR, "tray.ico"), ico);
   const bySize = new Map(rendered.map((img) => [img.width, img.png]));
-  fs.writeFileSync(path.join(OUT_DIR, "tray.png"), bySize.get(16));
-  fs.writeFileSync(path.join(OUT_DIR, "tray@2x.png"), bySize.get(32));
+  fs.writeFileSync(path.join(TRAY_DIR, "tray.png"), bySize.get(16));
+  fs.writeFileSync(path.join(TRAY_DIR, "tray@2x.png"), bySize.get(32));
   return {
-    icon: path.join(OUT_DIR, "icon.ico"),
-    trayIco: path.join(OUT_DIR, "tray.ico"),
-    tray: path.join(OUT_DIR, "tray.png"),
-    tray2x: path.join(OUT_DIR, "tray@2x.png"),
+    icon: path.join(ICON_DIR, "icon.ico"),
+    trayIco: path.join(TRAY_DIR, "tray.ico"),
+    tray: path.join(TRAY_DIR, "tray.png"),
+    tray2x: path.join(TRAY_DIR, "tray@2x.png"),
   };
 }
 

@@ -1,5 +1,4 @@
 const { BrowserWindow, ipcMain } = require("electron");
-const settingsLib = require("../lib/settings");
 const memory = require("../lib/memory");
 const agent = require("../lib/agent");
 const stt = require("../lib/stt");
@@ -9,6 +8,7 @@ const {
   BUNDLED_PACKS,
   loadSettings,
   saveSettings,
+  presentSettings,
   allPacks,
   currentPack,
   userData,
@@ -29,7 +29,7 @@ function registerIpc() {
     const senderWin = BrowserWindow.fromWebContents(e.sender);
     if (senderWin === state.petWindow) pet.resizePetToPack(pack);
     return {
-      settings: settingsLib.publicSettings(settings),
+      settings: presentSettings(settings),
       packsDir: BUNDLED_PACKS,
       packs: packs.map((p) => ({ id: p.id, name: p.name })),
       pack,
@@ -150,10 +150,11 @@ function registerIpc() {
       return { ok: true, ...result };
     } catch (err) {
       console.warn("transcribe failed", err && err.stack ? err.stack : err);
+      const message = require("../lib/user-errors").sttFailureMessage(err);
       const finished = voice.finishVoice(payload?.sessionId);
-      if (finished.ok) voice.notifyVoice("idle", { error: "语音识别失败" });
-      pet.sendPlay(null, "语音识别失败。");
-      return { ok: false, error: "语音识别失败。", text: "" };
+      if (finished.ok) voice.notifyVoice("idle", { error: message });
+      pet.sendPlay(null, message);
+      return { ok: false, error: message, text: "" };
     }
   });
 
@@ -166,7 +167,7 @@ function registerIpc() {
     if (win && win !== state.petWindow) win.close();
   });
 
-  ipcMain.handle("get-settings", () => settingsLib.publicSettings(loadSettings()));
+  ipcMain.handle("get-settings", () => presentSettings(loadSettings()));
 
   ipcMain.handle("save-settings", (_e, partial) => {
     const tray = require("./tray");
@@ -175,7 +176,7 @@ function registerIpc() {
     const hotkeyBind = tray.registerHotkeys();
     tray.notifySettings();
     tray.rebuildTrayMenu();
-    return { ...settingsLib.publicSettings(next), hotkeyBind };
+    return { ...presentSettings(next), hotkeyBind };
   });
 
   ipcMain.handle("set-compose-open", (_e, open) => {
@@ -258,7 +259,7 @@ function registerIpc() {
 
   ipcMain.handle("import-pack", async () => {
     await require("./windows").importPackDialog();
-    return settingsLib.publicSettings(loadSettings());
+    return presentSettings(loadSettings());
   });
 
   ipcMain.handle("import-pack-folder", async () => require("./windows").importPackFolder());

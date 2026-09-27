@@ -3,6 +3,11 @@
  * Extraction uses the pinned Node packages in the repo-root lockfile
  * (unbzip2-stream, tar, yauzl). Nothing here runs inside the end-user app.
  *
+ * unbzip2-stream 1.4.3 is unmaintained. It stays because the model archive is a
+ * large tar.bz2 and this package is a streaming pure-JS decoder. seek-bzip and
+ * compressjs are also unmaintained and buffer the decoded stream. Maintained
+ * alternatives found on npm are WebAssembly, not pure JavaScript.
+ *
  *   npm ci
  *   node scripts/fetch-vendor.js
  */
@@ -54,6 +59,11 @@ const ASSETS = {
     file: "sensevoice-apache-2.0-LICENSE",
     url: "https://www.apache.org/licenses/LICENSE-2.0.txt",
     sha256: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+  },
+  funasrModelLicense: {
+    file: "funasr-MODEL_LICENSE-58830eca",
+    url: "https://raw.githubusercontent.com/modelscope/FunASR/58830eca4012644aac0c3218c3ccc7d98f003fda/MODEL_LICENSE",
+    sha256: "7dba975a2069691db4992b0592d70828b330d2f8a30a71450f4e152a554e84f8",
   },
 };
 
@@ -305,10 +315,12 @@ function installDownloadedLicenses(paths) {
   fs.copyFileSync(paths.sherpaLicense, path.join(dir, "sherpa-onnx-LICENSE"));
   fs.copyFileSync(paths.onnxruntimeLicense, path.join(dir, "onnxruntime-LICENSE"));
   fs.copyFileSync(paths.sensevoiceLicense, path.join(dir, "sensevoice-LICENSE"));
+  fs.copyFileSync(paths.funasrModelLicense, path.join(dir, "funasr-MODEL_LICENSE"));
   for (const name of [
     "nodejs-LICENSE",
     "sensevoice-README.md",
     "sensevoice-LICENSE",
+    "funasr-MODEL_LICENSE",
     "sherpa-onnx-LICENSE",
     "onnxruntime-LICENSE",
   ]) {

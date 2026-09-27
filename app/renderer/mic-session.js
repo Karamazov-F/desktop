@@ -18,7 +18,7 @@
     }
 
     function stopCurrent(sessionId) {
-      if (arguments.length > 0 && sessionId !== currentSession) return null;
+      if (sessionId !== undefined && sessionId !== currentSession) return undefined;
       const rec = active;
       active = null;
       token += 1;

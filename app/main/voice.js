@@ -1,6 +1,7 @@
 const agent = require("../lib/agent");
 const chatLog = require("../lib/chat-log");
-const { createVoiceGate } = require("../lib/voice-session");
+const { TOO_EARLY } = require("../lib/user-errors");
+const { createVoiceGate, voiceReleaseTooSoon, MIN_VOICE_MS } = require("../lib/voice-session");
 const { state, currentPack, loadSettings, userData } = require("./state");
 
 const gate = createVoiceGate();
@@ -76,6 +77,7 @@ async function beginVoice(source = "hotkey") {
   if (!started.ok) return started;
   state.voiceBusy = true;
   state.voiceSession = started.sessionId;
+  state.voiceStartedAt = Date.now();
   state.voiceSource = source === "hold" ? "hold" : "hotkey";
   state.composeVoicePin = true;
   const compose = require("./compose");
@@ -88,6 +90,15 @@ async function beginVoice(source = "hotkey") {
 
 async function endVoice() {
   const sessionId = gate.current();
+  if (voiceReleaseTooSoon(state.voiceSource, state.voiceStartedAt)) {
+    cancelVoice(sessionId);
+    try {
+      require("./pet-window").sendPlay(null, TOO_EARLY);
+    } catch (err) {
+      console.warn("voice too early", err && err.message);
+    }
+    return { ok: false, error: "too-short", sessionId };
+  }
   sendRecord({ cmd: "stop", sessionId });
   notifyVoice("transcribing");
   return { ok: true, sessionId };
@@ -98,6 +109,7 @@ function cancelVoice(sessionId) {
   if (!result.ok) return result;
   state.voiceBusy = false;
   state.voiceHotkeyArmed = false;
+  state.voiceStartedAt = 0;
   sendRecord({ cmd: "cancel", sessionId: result.sessionId });
   notifyVoice("idle", { cancelled: true });
   return result;
@@ -108,6 +120,7 @@ function finishVoice(sessionId) {
   if (!result.ok) return result;
   state.voiceBusy = false;
   state.voiceHotkeyArmed = false;
+  state.voiceStartedAt = 0;
   return result;
 }
 

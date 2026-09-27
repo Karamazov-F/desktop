@@ -121,8 +121,7 @@ async function send(textOverride) {
   } catch (err) {
     console.error(err);
     think.remove();
-    const text = window.PetUserErrors?.userFacingError?.(err) || "这次没能连上模型，已改用本地回复";
-    addRow("meta", text);
+    addRow("meta", "这次没能回复，请再试一次");
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();

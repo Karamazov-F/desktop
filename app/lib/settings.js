@@ -224,14 +224,15 @@ function saveSettings(userData, partial, opts = {}) {
   if (next.voiceHotkey && next.hideHotkey && next.voiceHotkey === next.hideHotkey) {
     throw new Error("隐藏和语音不能用同一组快捷键");
   }
+  const changed = Object.keys(patch).filter((key) => key !== "deepseekApiKey" && current[key] !== patch[key]);
   const keyError = writeDisk(userData, next, opts);
   if (keyError && patch.deepseekApiKey) {
-    throw new Error(formatKeySaveError(Object.keys(patch)));
+    throw new Error(formatKeySaveError(changed));
   }
   return loadSettings(userData, opts);
 }
 
-function publicSettings(settings) {
+function publicSettings(settings, opts = {}) {
   const s = { ...settings };
   const key = s.deepseekApiKey || "";
   s.hasDeepseekKey = Boolean(key || s.deepseekApiKeyEnc);
@@ -241,6 +242,9 @@ function publicSettings(settings) {
   else if (s.retainPlaintextKey && key) s.keyStorage = "plaintext";
   else if (key || s.deepseekApiKeyEnc) s.keyStorage = "encrypted";
   else s.keyStorage = "none";
+  if (Object.prototype.hasOwnProperty.call(opts, "encryptionAvailable")) {
+    s.encryptionAvailable = Boolean(opts.encryptionAvailable);
+  }
   delete s.deepseekApiKey;
   delete s.deepseekApiKeyEnc;
   delete s.retainPlaintextKey;

@@ -1,12 +1,11 @@
 const fs = require("fs");
 const { app, Tray, Menu, nativeImage, globalShortcut, screen } = require("electron");
 const paths = require("../lib/paths");
-const { trayIconFiles, selectTrayAssets } = require("./tray-icon");
+const { trayIconFiles, selectTrayAssets, fallbackTrayPng } = require("./tray-icon");
 const dialogue = require("../lib/dialogue");
 const hotkeys = require("../lib/hotkeys");
-const settingsLib = require("../lib/settings");
 const { ACTION_LABELS } = require("../lib/tools");
-const { state, loadSettings, saveSettings, allPacks } = require("./state");
+const { state, loadSettings, saveSettings, allPacks, presentSettings } = require("./state");
 
 function currentVoiceHotkey() {
   return hotkeys.normalize(loadSettings().voiceHotkey);
@@ -68,7 +67,7 @@ function toggleHidden() {
 }
 
 function notifySettings() {
-  const pub = settingsLib.publicSettings(loadSettings());
+  const pub = presentSettings(loadSettings());
   state.petWindow?.webContents.send("settings-changed", pub);
   state.chatWindow?.webContents.send("settings-changed", pub);
   state.settingsWindow?.webContents.send("settings-changed", pub);
@@ -76,36 +75,40 @@ function notifySettings() {
 
 function loadTrayImage() {
   const files = trayIconFiles(paths.appDir());
-  let scale = 1;
-  try {
-    scale = screen.getPrimaryDisplay().scaleFactor || 1;
-  } catch (_) {}
-  const choice = selectTrayAssets(files, {
-    platform: process.platform,
-    scaleFactor: scale,
-    exists: (file) => fs.existsSync(file),
-  });
-  let image = nativeImage.createEmpty();
-  if (choice.useIco) image = nativeImage.createFromPath(choice.ico);
-  if (image.isEmpty() && fs.existsSync(choice.primary)) {
-    image = nativeImage.createFromPath(choice.primary);
-  }
-  if (choice.includeHiDpi) {
-    if (choice.useIco && !image.isEmpty()) {
-      image.addRepresentation({ scaleFactor: 1, path: choice.png });
-      image.addRepresentation({ scaleFactor: 2, path: choice.png2x });
-      return image;
+  const there = (file) => fs.existsSync(file);
+  const choice = selectTrayAssets(files, { platform: process.platform, exists: there });
+  if (process.platform === "win32") {
+    if (choice.useIco) {
+      const image = nativeImage.createFromPath(choice.ico);
+      if (!image.isEmpty()) return image;
     }
-    const layered = nativeImage.createFromPath(choice.png);
-    layered.addRepresentation({ scaleFactor: 2, path: choice.png2x });
-    if (!layered.isEmpty()) return layered;
+  } else if (there(files.png)) {
+    const image = nativeImage.createFromPath(files.png);
+    if (!image.isEmpty()) return image;
   }
-  if (image.isEmpty()) console.warn("tray icon missing", choice.primary);
-  return image;
+  console.warn("tray icon missing", choice.primary);
+  const fallback = nativeImage.createFromBuffer(fallbackTrayPng());
+  return fallback.isEmpty() ? nativeImage.createEmpty() : fallback;
+}
+
+let metricsBound = false;
+
+function bindTrayMetrics() {
+  if (metricsBound) return;
+  metricsBound = true;
+  screen.on("display-metrics-changed", () => {
+    if (!state.tray || state.tray.isDestroyed()) return;
+    try {
+      state.tray.setImage(loadTrayImage());
+    } catch (err) {
+      console.warn("tray image", err && err.message);
+    }
+  });
 }
 
 function buildTray() {
   state.tray = new Tray(loadTrayImage());
+  bindTrayMetrics();
   state.tray.on("click", () => {
     if (loadSettings().hidden) {
       toggleHidden();

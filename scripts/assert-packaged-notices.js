@@ -17,12 +17,15 @@ const REQUIRED = [
   { label: "onnxruntime-LICENSE", file: "resources/voice/licenses/onnxruntime-LICENSE" },
   { label: "sensevoice-README.md", file: "resources/voice/licenses/sensevoice-README.md" },
   { label: "sensevoice-LICENSE", file: "resources/voice/licenses/sensevoice-LICENSE" },
+  { label: "funasr-MODEL_LICENSE", file: "resources/voice/licenses/funasr-MODEL_LICENSE" },
   { label: "koffi-LICENSE.txt", file: "resources/licenses/koffi-LICENSE.txt" },
   { label: "LICENSE.electron.txt", file: "LICENSE.electron.txt" },
   { label: "LICENSES.chromium.html", file: "LICENSES.chromium.html" },
   { label: "OFL-LXGWWenKai.txt", asar: "renderer/fonts/OFL-LXGWWenKai.txt" },
   { label: "LXGWWenKai-Regular.woff2", asar: "renderer/fonts/LXGWWenKai-Regular.woff2" },
 ];
+
+const TRAY_ASAR = ["assets/tray/tray.ico", "assets/tray/tray.png", "assets/tray/tray@2x.png"];
 
 function noticeFileTokens(notice) {
   return [...String(notice).matchAll(/`([^`\n]+)`/g)]
@@ -68,7 +71,7 @@ function assertPackaged(unpackedDir = UNPACKED, notice = fs.readFileSync(NOTICE_
   }
   const problems = [];
   const asarPath = path.join(unpackedDir, "resources", "app.asar");
-  const asar = REQUIRED.some((item) => item.asar) ? loadAsar() : null;
+  const asar = loadAsar();
   for (const item of REQUIRED) {
     if (item.file) {
       const abs = path.join(unpackedDir, item.file);
@@ -76,6 +79,9 @@ function assertPackaged(unpackedDir = UNPACKED, notice = fs.readFileSync(NOTICE_
       continue;
     }
     if (!fs.existsSync(asarPath) || !asarHas(asar, asarPath, item.asar)) problems.push("app.asar/" + item.asar);
+  }
+  for (const rel of TRAY_ASAR) {
+    if (!fs.existsSync(asarPath) || !asarHas(asar, asarPath, rel)) problems.push("app.asar/" + rel);
   }
   if (problems.length) {
     throw new Error("安装包缺少 NOTICE 中的文件：\n" + problems.join("\n"));
@@ -93,4 +99,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { REQUIRED, noticeFileTokens, unmappedNoticeTokens, assertPackaged };
+module.exports = { REQUIRED, TRAY_ASAR, noticeFileTokens, unmappedNoticeTokens, assertPackaged };

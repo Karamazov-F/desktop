@@ -679,14 +679,36 @@ async function bootstrap() {
   async function stopMicAndSend(sessionId) {
     const rec = mic.markStop(sessionId);
     if (listenDot) listenDot.classList.remove("on");
+    if (rec === undefined) return;
+    const early = window.PetUserErrors?.TOO_EARLY || "没听清，按住稍久一点再说";
+    const failed = window.PetUserErrors?.VOICE_PROCESS_FAILED || "语音处理出错，请再试一次";
     if (!rec) {
       try {
         await window.petApi.voiceCancel?.(sessionId);
       } catch (_) {}
+      showBubble(early);
       return;
     }
-    const buf = await rec.stop(true);
-    await window.petApi.transcribeAudio(buf, "audio/wav", true, sessionId);
+    let buf;
+    try {
+      buf = await rec.stop(true);
+    } catch (err) {
+      console.error(err);
+      try {
+        await window.petApi.voiceCancel?.(sessionId);
+      } catch (_) {}
+      showBubble(failed);
+      return;
+    }
+    let result;
+    try {
+      result = await window.petApi.transcribeAudio(buf, "audio/wav", true, sessionId);
+    } catch (err) {
+      console.error(err);
+      showBubble(failed);
+      return;
+    }
+    if (result && result.ok === false && result.error === "too-short") showBubble(early);
   }
 
   async function showMicProblem(err, sessionId, fallback) {
@@ -711,10 +733,7 @@ async function bootstrap() {
       if (cmd === "stop") await stopMicAndSend(sessionId);
       if (cmd === "cancel") await discardMic(sessionId);
     } catch (err) {
-      const fallback =
-        cmd === "stop"
-          ? window.PetUserErrors?.TOO_EARLY || "没听清，按住稍久一点再说"
-          : "没能打开麦克风，请检查系统麦克风设置";
+      const fallback = "没能打开麦克风，请检查系统麦克风设置";
       await showMicProblem(err, sessionId, fallback);
     }
   });

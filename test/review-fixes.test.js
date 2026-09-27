@@ -20,8 +20,8 @@ const { allowAppAudio, isInsideDir } = require("../app/main/media-permission");
 const vendor = require("../scripts/fetch-vendor");
 const { EventEmitter } = require("events");
 const errors = require("../app/lib/user-errors");
-const { createVoiceGate } = require("../app/lib/voice-session");
-const { selectTrayAssets, trayIconFiles } = require("../app/main/tray-icon");
+const { createVoiceGate, voiceReleaseTooSoon } = require("../app/lib/voice-session");
+const { selectTrayAssets, trayIconFiles, fallbackTrayPng } = require("../app/main/tray-icon");
 const icons = require("../scripts/make-icons");
 const notices = require("../scripts/assert-packaged-notices");
 const tar = require("tar");
@@ -220,6 +220,28 @@ test("other settings save when encryption is unavailable, and a new key is refus
     () => settings.saveSettings(dir, { deepseekApiKey: "sk-new", alwaysOnTop: false }, brokenCrypto),
     /无法保存 API Key[\s\S]*窗口置顶[\s\S]*未保存：API Key/
   );
+  assert.throws(
+    () =>
+      settings.saveSettings(
+        dir,
+        {
+          deepseekApiKey: "sk-other",
+          alwaysOnTop: false,
+          memoryEnabled: true,
+          deepseekEnabled: false,
+          visionEnabled: false,
+          lifeStream: false,
+          hideOnFullscreen: true,
+          mysteryField: "leak",
+        },
+        brokenCrypto
+      ),
+    (err) => {
+      assert.match(err.message, /没有其他改动/);
+      assert.doesNotMatch(err.message, /窗口置顶|长期记忆|mysteryField/);
+      return true;
+    }
+  );
   const after = JSON.parse(fs.readFileSync(path.join(dir, "settings.json"), "utf8"));
   assert.equal(after.alwaysOnTop, false);
   assert.notEqual(after.deepseekApiKey, "sk-new");
@@ -302,7 +324,8 @@ test("an aborted turn does not call the network or capture the screen", async ()
   });
   assert.equal(result.source, "local-fallback");
   assert.equal(captured, false);
-  assert.match(result.error, /网络较慢/);
+  assert.match(result.error, /这次回复超时了，已改用本地回复/);
+  assert.doesNotMatch(result.error, /网络较慢/);
   assert.doesNotMatch(result.error, /Abort|timeout|Error/i);
 });
 
@@ -510,6 +533,12 @@ test("a stale voice cancel does not clear the newer session", () => {
   assert.equal(gate.current(), second.sessionId);
   assert.equal(gate.cancel().cancelled, true);
   assert.equal(gate.isBusy(), false);
+  const third = gate.begin();
+  assert.equal(gate.cancel("").ignored, true);
+  assert.equal(gate.cancel(null).ignored, true);
+  assert.equal(gate.finish("").ignored, true);
+  assert.equal(gate.isBusy(), true);
+  assert.equal(gate.cancel(third.sessionId).cancelled, true);
 });
 
 test("an older microphone stop does not drop the newer recorder", () => {
@@ -520,8 +549,9 @@ test("an older microphone stop does not drop the newer recorder", () => {
   const second = session.begin(2);
   const rec = { id: "live" };
   assert.equal(session.accept(second, rec), true);
-  assert.equal(session.markStop(1), null);
+  assert.equal(session.markStop(1), undefined);
   assert.strictEqual(session.markStop(2), rec);
+  assert.equal(session.markStop(), null);
 });
 
 test("model and microphone errors shown to the user are Chinese", () => {
@@ -532,27 +562,48 @@ test("model and microphone errors shown to the user are Chinese", () => {
   assert.equal(errors.userFacingError({ status: 403, message: "forbidden" }), "API Key 无效，请到设置里重新填写");
   const aborted = new Error("思考时间过长");
   aborted.name = "AbortError";
-  assert.equal(errors.userFacingError(aborted), "网络较慢，已改用本地回复");
+  assert.equal(errors.userFacingError(aborted), "这次回复超时了，已改用本地回复");
+  assert.equal(errors.userFacingError(new Error("思考时间过长")), "这次回复超时了，已改用本地回复");
   assert.equal(
     errors.userFacingError(new Error("getaddrinfo ENOTFOUND api.deepseek.com")),
-    "连不上 DeepSeek，请检查网络"
+    "连不上 DeepSeek，请检查网络，已改用本地回复"
   );
   assert.equal(
     errors.userFacingError({ status: 402, message: "Insufficient Balance" }),
-    "DeepSeek 账户余额不足"
+    "DeepSeek 账户余额不足，请到 DeepSeek 开放平台充值；这次先用本地回复"
   );
   assert.equal(errors.userFacingError({ status: 429, message: "rate limit" }), "请求太频繁，稍等一下再试");
-  assert.equal(errors.userFacingError(new Error("DeepSeek 500: boom")), "这次没能连上模型，已改用本地回复");
+  assert.equal(errors.userFacingError(new Error("DeepSeek 500: boom")), "这次没能回复，请再试一次");
+  assert.equal(errors.userFacingError(new Error("request failed with status 401")), "这次没能回复，请再试一次");
   assert.equal(
     errors.micFailureMessage({ name: "NotAllowedError" }),
-    "麦克风权限被拒绝，请在 Windows 设置 → 隐私 → 麦克风中允许本应用"
+    "麦克风权限被拒绝，请打开 设置 → 隐私和安全性 → 麦克风，开启“麦克风访问”和“允许桌面应用访问麦克风”"
   );
-  assert.equal(errors.micFailureMessage({ name: "NotFoundError" }), "没有检测到麦克风");
-  assert.equal(errors.micFailureMessage({ name: "NotReadableError" }), "麦克风正被其他程序占用");
+  assert.equal(errors.micFailureMessage({ name: "NotFoundError" }), "没有检测到麦克风，请插上耳机或麦克风后再试");
+  assert.equal(
+    errors.micFailureMessage({ name: "NotReadableError" }),
+    "麦克风正被其他程序占用（如会议软件），关闭后再试"
+  );
   assert.equal(errors.TOO_EARLY, "没听清，按住稍久一点再说");
+  assert.equal(errors.VOICE_PROCESS_FAILED, "语音处理出错，请再试一次");
+  assert.equal(errors.sttFailureMessage(new Error("语音组件未随安装包提供，请重新安装桌宠。")), "语音组件损坏，请重新安装桌宠");
+  assert.equal(errors.sttFailureMessage(new Error("语音识别超时")), "识别超时，请再说一次");
+  assert.equal(errors.sttFailureMessage(new Error("SenseVoice 启动超时")), "识别超时，请再说一次");
+  assert.equal(errors.sttFailureMessage(new Error("sherpa worker exited")), "语音识别出错，请再试一次");
   const plain = errors.keyHintText({ keyStorage: "plaintext", deepseekApiKeyMasked: "sk-ab…wxyz" });
   assert.match(plain, /明文/);
+  assert.match(plain, /不放心可以点“清除 API Key”/);
   assert.doesNotMatch(plain, /不明文存放/);
+  const none = errors.keyHintText({ keyStorage: "none", encryptionAvailable: false });
+  assert.doesNotMatch(none, /会用系统加密保存/);
+  assert.match(none, /系统加密不可用/);
+  assert.match(errors.keyHintText({ keyStorage: "none", encryptionAvailable: true }), /会用系统加密保存/);
+  assert.equal(
+    errors.displaySaveError(new Error("Error invoking remote method 'save-settings': Error: 系统加密不可用，无法保存 API Key。已保存：没有其他改动。未保存：API Key。")),
+    "系统加密不可用，无法保存 API Key。已保存：没有其他改动。未保存：API Key。"
+  );
+  assert.equal(errors.fieldLabel("notARealField"), "其他设置");
+  assert.equal(errors.userFacingError(Object.assign(new Error("response body exceeded limit"), { code: "EMAXBODY" })), "这次没能回复，请再试一次");
 });
 
 test("import failure restores a pack that was already there", () => {
@@ -566,15 +617,10 @@ test("import failure restores a pack that was already there", () => {
   fs.mkdirSync(imported, { recursive: true });
   const dest = path.join(imported, "ok.dpet");
   fs.writeFileSync(dest, Buffer.from("previous-good-pack"));
-  assert.throws(
-    () =>
-      packs.importDpet(archive, imported, cache, {
-        afterReplace() {
-          throw new Error("角色包文件已损坏");
-        },
-      }),
-    /损坏/
-  );
+  packs.armImportFailureForTest(() => {
+    throw new Error("角色包文件已损坏");
+  });
+  assert.throws(() => packs.importDpet(archive, imported, cache), /损坏/);
   assert.equal(fs.readFileSync(dest, "utf8"), "previous-good-pack");
 });
 
@@ -592,19 +638,63 @@ test("rejected marker is only for permanent pack failures", () => {
   assert.equal(fs.existsSync(path.join(cache, packs.cacheKeyForDpet(bad)) + ".rejected"), true);
 
   const locked = path.join(parent, "locked.dpet");
-  fs.mkdirSync(locked);
-  assert.throws(() => packs.readDpetPack(locked, cache));
-  assert.equal(fs.existsSync(path.join(cache, packs.cacheKeyForDpet(locked)) + ".rejected"), false);
+  fs.writeFileSync(locked, Buffer.from("secret-pack-bytes"));
+  denyRead(locked);
+  try {
+    let probe;
+    try {
+      fs.readFileSync(locked);
+    } catch (err) {
+      probe = err;
+    }
+    assert.ok(probe && (probe.code === "EACCES" || probe.code === "EPERM"), probe && probe.code);
+    let caught;
+    try {
+      packs.readDpetPack(locked, cache);
+    } catch (err) {
+      caught = err;
+    }
+    assert.ok(caught);
+    assert.ok(caught.code === "EACCES" || caught.code === "EPERM", caught.code);
+    assert.notEqual(caught.code, "EISDIR");
+    assert.equal(fs.existsSync(path.join(cache, packs.cacheKeyForDpet(locked)) + ".rejected"), false);
+  } finally {
+    allowRead(locked);
+  }
 });
+
+function denyRead(file) {
+  if (process.platform === "win32") {
+    const { execFileSync } = require("child_process");
+    execFileSync("icacls", [file, "/inheritance:r", "/deny", "*S-1-1-0:(R)"], { stdio: "pipe" });
+    return;
+  }
+  fs.chmodSync(file, 0);
+}
+
+function allowRead(file) {
+  if (process.platform === "win32") {
+    const { execFileSync } = require("child_process");
+    try {
+      execFileSync("icacls", [file, "/grant", "*S-1-1-0:(F)"], { stdio: "pipe" });
+    } catch (_) {}
+    return;
+  }
+  try {
+    fs.chmodSync(file, 0o644);
+  } catch (_) {}
+}
 
 test("startup clears leftover import and unpack directories", () => {
   const cache = tmpDir();
   fs.mkdirSync(path.join(cache, ".import-abc"));
   fs.mkdirSync(path.join(cache, ".unpack-def"));
   fs.mkdirSync(path.join(cache, "keep-me"));
+  fs.writeFileSync(path.join(cache, "old.dpet.bak-import"), "leftover");
   packs.cleanStagingDirs(cache);
   assert.equal(fs.existsSync(path.join(cache, ".import-abc")), false);
   assert.equal(fs.existsSync(path.join(cache, ".unpack-def")), false);
+  assert.equal(fs.existsSync(path.join(cache, "old.dpet.bak-import")), false);
   assert.equal(fs.existsSync(path.join(cache, "keep-me")), true);
 });
 
@@ -628,6 +718,40 @@ test("response body stays tied to the abort signal", async () => {
     })
   );
   assert.ok(Date.now() - started < 2000);
+  if (typeof server.closeAllConnections === "function") server.closeAllConnections();
+  await new Promise((resolve) => server.close(resolve));
+});
+
+test("response body reads stop at the size cap", async () => {
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    const chunk = Buffer.alloc(64 * 1024, 0x61);
+    const timer = setInterval(() => {
+      if (res.writableEnded || res.destroyed) {
+        clearInterval(timer);
+        return;
+      }
+      res.write(chunk);
+    }, 5);
+    res.on("close", () => clearInterval(timer));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  const started = Date.now();
+  await assert.rejects(
+    () =>
+      deepseek.chatCompletions({
+        apiKey: "sk-test",
+        baseUrl: `http://127.0.0.1:${port}`,
+        messages: [{ role: "user", content: "hi" }],
+        timeoutMs: 30000,
+      }),
+    (err) => {
+      assert.equal(err.code, "EMAXBODY");
+      return true;
+    }
+  );
+  assert.ok(Date.now() - started < 10000);
   if (typeof server.closeAllConnections === "function") server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 });
@@ -666,33 +790,43 @@ test("pinned unpackers extract zip, tar.gz, and bzip2 without leaving the archiv
   assert.match(fs.readFileSync(path.join(model, "README.md"), "utf8"), /readme/);
 });
 
-test("tray picks the high-dpi asset and the icon set has every size", () => {
+test("tray uses a packaged ico on Windows and png elsewhere", () => {
   const files = trayIconFiles("/app");
-  assert.match(files.png2x, /tray@2x\.png$/);
-  const hi = selectTrayAssets(
+  assert.match(files.ico, /assets\/tray\/tray\.ico$/);
+  assert.match(files.png2x, /assets\/tray\/tray@2x\.png$/);
+  assert.doesNotMatch(files.ico, /\/build\//);
+  const win = selectTrayAssets(
     { ico: "tray.ico", png: "tray.png", png2x: "tray@2x.png" },
-    { platform: "win32", scaleFactor: 2, exists: () => true }
+    { platform: "win32", exists: () => true }
   );
-  assert.equal(hi.useIco, true);
-  assert.equal(hi.primary, "tray@2x.png");
-  assert.equal(hi.includeHiDpi, true);
+  assert.equal(win.useIco, true);
+  assert.equal(win.primary, "tray.ico");
+  assert.equal(win.includeHiDpi, undefined);
   const lo = selectTrayAssets(
     { ico: "tray.ico", png: "tray.png", png2x: "tray@2x.png" },
-    { platform: "linux", scaleFactor: 1, exists: () => true }
+    { platform: "linux", exists: () => true }
   );
   assert.equal(lo.useIco, false);
   assert.equal(lo.primary, "tray.png");
-  const ico = icons.icoDirectory(fs.readFileSync(path.join(__dirname, "..", "app", "build", "icon.ico")));
+  const root = path.join(__dirname, "..");
+  const ico = icons.icoDirectory(fs.readFileSync(path.join(root, "app", "assets", "tray", "tray.ico")));
   const widths = ico.map((img) => img.width);
   for (const size of icons.ICON_SIZES) assert.ok(widths.includes(size), String(size));
-  assert.deepEqual(icons.pngSize(path.join(__dirname, "..", "app", "build", "tray.png")), {
-    width: 16,
-    height: 16,
-  });
-  assert.deepEqual(icons.pngSize(path.join(__dirname, "..", "app", "build", "tray@2x.png")), {
-    width: 32,
-    height: 32,
-  });
+  assert.ok(widths.includes(20));
+  assert.ok(widths.includes(40));
+  assert.deepEqual(icons.pngSize(path.join(root, "app", "assets", "tray", "tray.png")), { width: 16, height: 16 });
+  assert.deepEqual(icons.pngSize(path.join(root, "app", "assets", "tray", "tray@2x.png")), { width: 32, height: 32 });
+  assert.equal(icons.pngSize(fallbackTrayPng()).width, 16);
+  const traySrc = fs.readFileSync(path.join(root, "app", "main", "tray.js"), "utf8");
+  assert.match(traySrc, /display-metrics-changed/);
+  assert.doesNotMatch(traySrc, /addRepresentation/);
+  assert.doesNotMatch(traySrc, /scaleFactor/);
+  assert.equal(fs.existsSync(path.join(root, "app", "tray.ico")), false);
+  assert.equal(fs.existsSync(path.join(root, "app", "tray.png")), false);
+  assert.deepEqual(notices.TRAY_ASAR, ["assets/tray/tray.ico", "assets/tray/tray.png", "assets/tray/tray@2x.png"]);
+  assert.equal(voiceReleaseTooSoon("hotkey", 1000, 1400), true);
+  assert.equal(voiceReleaseTooSoon("hotkey", 1000, 1600), false);
+  assert.equal(voiceReleaseTooSoon("hold", 1000, 1100), false);
 });
 
 test("bold is synthesized and emoji precede the generic family", () => {
@@ -706,13 +840,19 @@ test("bold is synthesized and emoji precede the generic family", () => {
   assert.match(pet, /font:\s*700/);
   assert.ok(pet.endsWith("\n"));
   assert.equal(pet.startsWith(" "), false);
+  assert.equal(/[ \t]$/m.test(pet), false);
   const compose = fs.readFileSync(path.join(__dirname, "..", "app", "renderer", "compose.css"), "utf8");
   assert.equal(compose.startsWith(" "), false);
   assert.ok(compose.endsWith("\n"));
+  assert.equal(/[ \t]$/m.test(compose), false);
 });
 
 test("NOTICE license files are all checked at package time", () => {
   const notice = fs.readFileSync(path.join(__dirname, "..", "NOTICE"), "utf8");
   assert.deepEqual(notices.unmappedNoticeTokens(notice), []);
   assert.match(notice, /sensevoice-LICENSE/);
+  assert.match(notice, /funasr-MODEL_LICENSE/);
+  assert.match(notice, /FunASR Model Open Source License Agreement v1\.1/);
+  assert.match(notice, /58830eca4012644aac0c3218c3ccc7d98f003fda/);
+  assert.equal(vendor.ASSETS.funasrModelLicense.sha256, "7dba975a2069691db4992b0592d70828b330d2f8a30a71450f4e152a554e84f8");
 });

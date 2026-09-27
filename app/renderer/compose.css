@@ -160,4 +160,3 @@ body.expanded #compose-panel { opacity: 1; pointer-events: auto; transform: scal
 @media (prefers-reduced-motion: reduce) {
   .btn, .quick-btn { transition: none; }
 }
-    

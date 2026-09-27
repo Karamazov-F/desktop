@@ -1,7 +1,6 @@
 const { BrowserWindow, screen, dialog } = require("electron");
 const { browserWebPreferences, hardenWindow } = require("./window-guard");
 const dialogue = require("../lib/dialogue");
-const settingsLib = require("../lib/settings");
 const agent = require("../lib/agent");
 const chatLog = require("../lib/chat-log");
 const { ACTION_LABELS } = require("../lib/tools");
@@ -13,6 +12,7 @@ const {
   currentPack,
   loadSettings,
   saveSettings,
+  presentSettings,
   userData,
   importedDir,
   cacheDir,
@@ -106,7 +106,7 @@ async function runChatter() {
   const pack = currentPack();
   if (!pack) return;
   const pet = require("./pet-window");
-  const pub = settingsLib.publicSettings(loadSettings());
+  const pub = presentSettings(loadSettings());
   if (pub.deepseekEnabled && pub.hasDeepseekKey) {
     try {
       const res = await agent.runAgentTurn({

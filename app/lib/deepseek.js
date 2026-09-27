@@ -1,5 +1,12 @@
 const DEFAULT_BASE = "https://api.deepseek.com";
 const DEFAULT_MODEL = "deepseek-flash";
+const MAX_RESPONSE_BYTES = 1024 * 1024;
+
+function bodyTooLarge() {
+  const err = new Error("response body exceeded limit");
+  err.code = "EMAXBODY";
+  return err;
+}
 
 function normalizeBase(url) {
   return String(url || DEFAULT_BASE).replace(/\/+$/, "");
@@ -113,6 +120,7 @@ async function readAbortableText(res, signal) {
   if (!res.body || typeof res.body.getReader !== "function") {
     const text = await res.text();
     if (signal?.aborted) throw abortError();
+    if (Buffer.byteLength(text) > MAX_RESPONSE_BYTES) throw bodyTooLarge();
     return text;
   }
   const reader = res.body.getReader();
@@ -121,14 +129,22 @@ async function readAbortableText(res, signal) {
   };
   if (signal) signal.addEventListener("abort", onAbort);
   const chunks = [];
+  let total = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (signal?.aborted) throw abortError();
       if (done) break;
-      chunks.push(Buffer.from(value));
+      const buf = Buffer.from(value);
+      total += buf.length;
+      if (total > MAX_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => {});
+        throw bodyTooLarge();
+      }
+      chunks.push(buf);
     }
   } catch (err) {
+    if (err && err.code === "EMAXBODY") throw err;
     if (signal?.aborted || err?.name === "AbortError") throw abortError();
     throw err;
   } finally {
@@ -158,4 +174,5 @@ module.exports = {
   chatCompletionsRetry,
   extractMessage,
   readAbortableText,
+  MAX_RESPONSE_BYTES,
 };

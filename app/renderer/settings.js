@@ -26,15 +26,7 @@ function fill(s) {
     showHotkey($("hideHotkey"), s.hideHotkey);
     showHotkey($("voiceHotkey"), s.voiceHotkey);
   }
-  $("keyHint").textContent = window.PetUserErrors
-    ? window.PetUserErrors.keyHintText(s)
-    : s.keyUnreadable
-      ? "已保存的 Key 暂时无法读取。可以清除后重新填写。"
-      : s.keyStorage === "plaintext"
-        ? `已保存 Key：${s.deepseekApiKeyMasked}。系统加密不可用，这枚 Key 仍以明文留在本机。`
-        : s.hasDeepseekKey
-          ? `已保存 Key：${s.deepseekApiKeyMasked}（系统加密，不明文存放）`
-          : "尚未保存 Key。Key 会用系统加密保存在本机。";
+  $("keyHint").textContent = window.PetUserErrors.keyHintText(s);
 }
 
 function bindCapture(el) {
@@ -106,7 +98,7 @@ $("save").addEventListener("click", async () => {
   try {
     next = await window.petApi.saveSettings(partial);
   } catch (err) {
-    $("status").textContent = String(err.message || err);
+    $("status").textContent = window.PetUserErrors.displaySaveError(err);
     return;
   }
   $("deepseekApiKey").value = "";
@@ -126,7 +118,7 @@ $("clearApiKey").addEventListener("click", async () => {
   try {
     next = await window.petApi.saveSettings({ deepseekApiKey: null });
   } catch (err) {
-    $("status").textContent = String(err.message || err);
+    $("status").textContent = window.PetUserErrors.displaySaveError(err);
     return;
   }
   $("deepseekApiKey").value = "";
@@ -144,5 +136,5 @@ $("importDpet").addEventListener("click", () => window.petApi.importPack());
 $("importFolder").addEventListener("click", () => window.petApi.importPackFolder());
 
 init().catch((err) => {
-  $("status").textContent = String(err.message || err);
+  $("status").textContent = window.PetUserErrors.displaySaveError(err);
 });

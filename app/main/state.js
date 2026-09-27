@@ -61,6 +61,7 @@ function keyOpts() {
   }
   if (!available) {
     return {
+      encryptionAvailable: false,
       sealKey() {
         throw new Error("系统加密不可用，无法保存 API Key");
       },
@@ -70,6 +71,7 @@ function keyOpts() {
     };
   }
   return {
+    encryptionAvailable: true,
     sealKey(plain) {
       return safeStorage.encryptString(String(plain)).toString("base64");
     },
@@ -77,6 +79,11 @@ function keyOpts() {
       return safeStorage.decryptString(Buffer.from(String(enc), "base64"));
     },
   };
+}
+
+function presentSettings(settings) {
+  const opts = keyOpts();
+  return settingsLib.publicSettings(settings, { encryptionAvailable: opts.encryptionAvailable });
 }
 
 function loadSettings() {
@@ -111,6 +118,7 @@ module.exports = {
   packDirs,
   loadSettings,
   saveSettings,
+  presentSettings,
   allPacks,
   currentPack,
   clamp,
