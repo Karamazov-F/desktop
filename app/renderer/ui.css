@@ -11,7 +11,7 @@
   --ok: #b9d8b1;
   --bad: #ffafa5;
   --titlebar: 42px;
-  --font: var(--pet-ui-font, "乐米石朗体", "Microsoft YaHei UI", sans-serif);
+  --font: var(--pet-ui-font, "LXGW WenKai", "Microsoft YaHei UI", sans-serif);
 }
 
 html {
@@ -335,67 +335,6 @@ button:disabled {
   margin: 12px 0 0;
   font-size: 12px;
   color: var(--ok);
-}
-
-#list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.item {
-  padding: 11px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.065);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.item:last-child {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
-}
-
-.item-top {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.item .name {
-  font-weight: 500;
-  flex: 1;
-}
-
-.item .tag {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
-.item.ok .tag {
-  color: var(--ok);
-}
-
-.item.bad .tag {
-  color: var(--bad);
-}
-
-.item .meta {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-#log:not(.chat) {
-  margin-top: 16px;
-  min-height: 52px;
-  color: var(--muted);
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-
-code {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 0.92em;
 }
 
 #wrap {

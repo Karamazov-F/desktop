@@ -1,5 +1,6 @@
 const { BrowserWindow, screen } = require("electron");
 const { state, appFile, clamp } = require("./state");
+const { browserWebPreferences, hardenWindow } = require("./window-guard");
 
 const COMPOSE_SIZE = { width: 360, height: 68 };
 const COMPOSE_PILL_SIZE = { width: 120, height: 76 };
@@ -163,12 +164,9 @@ function prewarmComposeWindow() {
     resizable: false,
     hasShadow: false,
     show: false,
-    webPreferences: {
-      preload: appFile("preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: browserWebPreferences(),
   });
+  hardenWindow(state.composeWindow);
   state.composeWindow.setAlwaysOnTop(true, "screen-saver");
   state.composeWindow.loadFile(appFile("renderer", "compose.html"));
   state.composeWindow.once("ready-to-show", () => {
@@ -223,12 +221,9 @@ function openComposeWindow({ focus = true } = {}) {
     resizable: false,
     hasShadow: false,
     show: false,
-    webPreferences: {
-      preload: appFile("preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: browserWebPreferences(),
   });
+  hardenWindow(state.composeWindow);
   state.composeWindow.setAlwaysOnTop(true, "screen-saver");
   state.composeWindow.loadFile(appFile("renderer", "compose.html"));
   state.composeWindow.once("ready-to-show", () => {

@@ -148,7 +148,6 @@ function rebuildTrayMenu() {
       },
       { type: "separator" },
       { label: "设置…", click: () => windows.openSettingsWindow() },
-      { label: "环境依赖…", click: () => windows.openSetupWindow() },
       { type: "separator" },
       { label: "退出", click: () => app.quit() },
     ])

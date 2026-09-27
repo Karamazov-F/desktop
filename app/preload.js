@@ -7,13 +7,12 @@ contextBridge.exposeInMainWorld("petApi", {
   setPack: (packId) => ipcRenderer.invoke("set-pack", packId),
   getSettings: () => ipcRenderer.invoke("get-settings"),
   saveSettings: (partial) => ipcRenderer.invoke("save-settings", partial),
-  clearMemory: () => ipcRenderer.invoke("clear-memory"),
+  clearAllLocal: () => ipcRenderer.invoke("clear-all-local"),
   importPack: () => ipcRenderer.invoke("import-pack"),
   importPackFolder: () => ipcRenderer.invoke("import-pack-folder"),
   resizeToPack: (size) => ipcRenderer.invoke("resize-to-pack", size),
   chat: (text) => ipcRenderer.invoke("chat", text),
   openChat: () => ipcRenderer.invoke("open-chat"),
-  openDeps: () => ipcRenderer.invoke("open-deps"),
   setMousePassthrough: (pass) => ipcRenderer.send("mouse-passthrough", pass),
   setComposeOpen: (open) => ipcRenderer.invoke("set-compose-open", open),
   setComposeHover: (hovered) => ipcRenderer.send("compose-hover", Boolean(hovered)),
@@ -38,9 +37,6 @@ contextBridge.exposeInMainWorld("petApi", {
       mime,
       autoSend,
     }),
-  depsStatus: () => ipcRenderer.invoke("deps-status"),
-  depsInstall: (ids) => ipcRenderer.invoke("deps-install", ids),
-  depsContinue: () => ipcRenderer.invoke("deps-continue"),
   getChatLog: () => ipcRenderer.invoke("get-chat-log"),
   onPackChanged: (cb) => {
     ipcRenderer.on("pack-changed", (_e, id) => cb(id));
@@ -78,13 +74,13 @@ contextBridge.exposeInMainWorld("petApi", {
   onFloatText: (cb) => {
     ipcRenderer.on("float-text", (_e, text) => cb(text || ""));
   },
-  onDepsProgress: (cb) => {
-    ipcRenderer.on("deps-progress", (_e, p) => cb(p));
-  },
   onThinking: (cb) => {
     ipcRenderer.on("chat-thinking", (_e, on) => cb(on));
   },
   onChatTurn: (cb) => {
     ipcRenderer.on("chat-turn", (_e, payload) => cb(payload || {}));
+  },
+  onChatCleared: (cb) => {
+    ipcRenderer.on("chat-cleared", () => cb());
   },
 });

@@ -19,3 +19,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+This MIT license covers the application source code only.
+
+The 小鲸 character art and animation in packs/xiao-jing/ are all rights
+reserved and are not licensed under MIT. Do not redistribute that art.
+
+The UI font LXGW WenKai is licensed under the SIL Open Font License 1.1.
+See app/renderer/fonts/OFL-LXGWWenKai.txt.

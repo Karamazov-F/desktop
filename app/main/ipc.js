@@ -3,7 +3,6 @@ const settingsLib = require("../lib/settings");
 const memory = require("../lib/memory");
 const agent = require("../lib/agent");
 const stt = require("../lib/stt");
-const deps = require("../lib/deps");
 const chatLog = require("../lib/chat-log");
 const {
   state,
@@ -13,8 +12,13 @@ const {
   allPacks,
   currentPack,
   userData,
-  depsCtx,
 } = require("./state");
+
+async function notifyCapture(on) {
+  const pet = require("./pet-window");
+  if (on) pet.sendPlay(null, "正在查看屏幕，画面将发送到视觉接口");
+  await require("./capture-notice").setCaptureNotice(on);
+}
 
 function registerIpc() {
   ipcMain.handle("get-bootstrap", (e) => {
@@ -79,6 +83,7 @@ function registerIpc() {
         userText,
         userData: userData(),
         captureScreen: pet.capturePrimaryJpeg,
+        notifyCapture,
         applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
         applyMove: (dir, dist) => pet.movePet(dir, dist),
       });
@@ -136,8 +141,7 @@ function registerIpc() {
         voice.notifyVoice("idle");
         return { ok: false, error: "too-short", text: "" };
       }
-      const ext = String(payload?.mime || "audio/webm").includes("wav") ? "wav" : "webm";
-      const text = await stt.transcribeBuffer(bytes, ext);
+      const text = await stt.transcribeBuffer(bytes);
       const result = await voice.handleTranscribedText(text, {
         autoSend: payload?.autoSend !== false,
       });
@@ -238,41 +242,18 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle("open-deps", () => {
-    require("./windows").openSetupWindow();
-    return true;
-  });
-
-  ipcMain.handle("deps-status", () => deps.scan(depsCtx()));
-
-  ipcMain.handle("deps-install", async (_e, ids) => {
-    try {
-      const ctx = depsCtx();
-      stt.setContext(ctx);
-      await deps.installIds(ctx, Array.isArray(ids) ? ids : []);
-      stt.setContext(depsCtx());
-      return { ok: true, rows: deps.scan(depsCtx()) };
-    } catch (err) {
-      return { ok: false, error: String(err.message || err), rows: deps.scan(depsCtx()) };
-    }
-  });
-
-  ipcMain.handle("deps-continue", () => {
-    if (state.setupWindow && !state.setupWindow.isDestroyed()) state.setupWindow.close();
-    const rows = deps.scan(depsCtx());
-    const missing = deps.missingRequired(rows);
-    if (!missing.length) stt.warmup();
-    return { ok: true };
-  });
-
   ipcMain.handle("get-chat-log", () => {
     const pack = currentPack();
     return pack ? chatLog.loadChat(userData(), pack.id) : [];
   });
 
-  ipcMain.handle("clear-memory", () => {
-    const pack = currentPack();
-    if (pack) memory.clearMemory(userData(), pack.id);
+  ipcMain.handle("clear-all-local", () => {
+    memory.clearAllMemory(userData());
+    chatLog.clearAllChats(userData());
+    agent.clearSessions();
+    if (state.chatWindow && !state.chatWindow.isDestroyed()) {
+      state.chatWindow.webContents.send("chat-cleared");
+    }
     return { ok: true };
   });
 
@@ -284,4 +265,4 @@ function registerIpc() {
   ipcMain.handle("import-pack-folder", async () => require("./windows").importPackFolder());
 }
 
-module.exports = { registerIpc };
+module.exports = { registerIpc, notifyCapture };

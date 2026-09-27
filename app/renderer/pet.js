@@ -635,72 +635,41 @@ async function bootstrap() {
 
   const listenDot = document.getElementById("listen-dot");
   let micToken = 0;
-  let mediaStream = null;
-  let mediaRecorder = null;
-  let chunks = [];
-
-  function pickMime() {
-    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg"];
-    for (const t of types) {
-      if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
-    }
-    return "audio/webm";
-  }
+  let pcm = null;
 
   async function discardMic() {
     micToken += 1;
-    const rec = mediaRecorder;
-    const stream = mediaStream;
-    mediaRecorder = null;
-    mediaStream = null;
-    chunks = [];
+    const rec = pcm;
+    pcm = null;
     if (listenDot) listenDot.classList.remove("on");
     if (rec) {
-      rec.onstop = () => {};
       try {
-        if (rec.state !== "inactive") rec.stop();
+        await rec.stop(false);
       } catch (_) {}
     }
-    (stream?.getTracks() || []).forEach((t) => t.stop());
   }
 
   async function startMic() {
     const token = ++micToken;
-    chunks = [];
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const rec = window.PetPcm.create();
+    await rec.start();
     if (token !== micToken) {
-      stream.getTracks().forEach((t) => t.stop());
+      try {
+        await rec.stop(false);
+      } catch (_) {}
       return;
     }
-    mediaStream = stream;
-    const mime = pickMime();
-    mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mime });
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size) chunks.push(e.data);
-    };
-    mediaRecorder.start();
+    pcm = rec;
     if (listenDot) listenDot.classList.add("on");
   }
 
   async function stopMicAndSend() {
-    const rec = mediaRecorder;
-    const stream = mediaStream;
-    mediaRecorder = null;
-    mediaStream = null;
+    const rec = pcm;
+    pcm = null;
     if (listenDot) listenDot.classList.remove("on");
     if (!rec) return;
-    const blob = await new Promise((resolve) => {
-      rec.onstop = () =>
-        resolve(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
-      try {
-        rec.stop();
-      } catch {
-        resolve(new Blob(chunks, { type: "audio/webm" }));
-      }
-    });
-    (stream?.getTracks() || []).forEach((t) => t.stop());
-    const buf = new Uint8Array(await blob.arrayBuffer());
-    await window.petApi.transcribeAudio(buf, blob.type || "audio/webm", true);
+    const buf = await rec.stop(true);
+    await window.petApi.transcribeAudio(buf, "audio/wav", true);
   }
 
   window.petApi.onVoiceRecord?.(async (cmd) => {
@@ -713,7 +682,7 @@ async function bootstrap() {
       if (listenDot) listenDot.classList.remove("on");
       if (cmd !== "stop") return;
       try {
-        await window.petApi.transcribeAudio(new Uint8Array(0), "audio/webm", true);
+        await window.petApi.transcribeAudio(new Uint8Array(0), "audio/wav", true);
       } catch (_) {}
     }
   });

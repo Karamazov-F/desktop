@@ -13,6 +13,8 @@ const {
 } = require("./tools");
 
 const sessions = new Map();
+const MAX_ROUNDS = 5;
+const MAX_TURN_MS = 60000;
 
 function sessionKey(packId) {
   return String(packId || "default");
@@ -53,16 +55,20 @@ function buildSystemPrompt(pack, settings, mem) {
   }
   if (settings.visionEnabled) {
     parts.push(
-      "截屏感知已开启：用户问屏幕上是什么、在忙什么时，先 glance_screen 再回答。描述保持笼统。"
+      "允许查看屏幕已开启：用户问屏幕上是什么、在忙什么时，先 glance_screen 再回答。描述保持笼统。"
     );
   } else {
-    parts.push("截屏感知关闭。若用户要你看屏幕，说明需要先在托盘打开「截屏感知」。");
+    parts.push("查看屏幕已关闭。若用户要你看屏幕，说明需要先在设置里打开「允许查看屏幕」。");
   }
   return parts.join("\n");
 }
 
 function localFallback(pack, userText) {
   return dialogue.reply(pack, userText);
+}
+
+function clearSessions() {
+  sessions.clear();
 }
 
 async function runAgentTurn({
@@ -73,6 +79,8 @@ async function runAgentTurn({
   captureScreen,
   applyPlay,
   applyMove,
+  allowVision = true,
+  notifyCapture,
 }) {
   const displayName = pack.persona?.displayName || pack.name || "桌宠";
   const local = localFallback(pack, userText);
@@ -90,18 +98,21 @@ async function runAgentTurn({
     };
   }
 
+  const visionOn = Boolean(settings.visionEnabled && allowVision);
+  const effective = { ...settings, visionEnabled: visionOn };
   const mem = settings.memoryEnabled
     ? memory.loadMemory(userData, pack.id)
     : memory.emptyMemory();
   const actions = availableActions(pack);
   const tools = toolDefs({
     memoryEnabled: settings.memoryEnabled,
-    visionEnabled: settings.visionEnabled,
+    visionEnabled: visionOn,
     actions,
   });
-  const allowed = allowedToolNames(settings);
+  const allowed = allowedToolNames(effective);
+  const started = Date.now();
   const messages = [
-    { role: "system", content: buildSystemPrompt(pack, settings, mem) },
+    { role: "system", content: buildSystemPrompt(pack, effective, mem) },
     ...getHistory(pack.id),
     { role: "user", content: String(userText || "").slice(0, 2000) },
   ];
@@ -114,7 +125,10 @@ async function runAgentTurn({
   let pendingMove = null;
 
   try {
-    for (let round = 0; round < 5; round++) {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      if (Date.now() - started > MAX_TURN_MS) {
+        throw new Error("思考时间过长");
+      }
       const result = await chatCompletionsRetry({
         apiKey: settings.deepseekApiKey,
         baseUrl: settings.deepseekBaseUrl,
@@ -161,18 +175,24 @@ async function runAgentTurn({
             memory.forgetFacts(userData, pack.id, args.query);
             toolResult = "forgotten";
           } else if (name === "glance_screen") {
-            if (!captureScreen) toolResult = "capture unavailable";
-            else {
-              const jpeg = await captureScreen();
-              const desc = await describeScreenshot({
-                apiKey: settings.deepseekApiKey,
-                baseUrl: settings.deepseekBaseUrl,
-                model: settings.visionModel || settings.deepseekModel || "deepseek-flash",
-                jpegBuffer: jpeg,
-                extraHint: userText,
-              });
-              usedVision = true;
-              toolResult = desc || "看不太清";
+            if (!visionOn || typeof captureScreen !== "function") {
+              toolResult = "查看屏幕未开启";
+            } else {
+              if (notifyCapture) await notifyCapture(true);
+              try {
+                const jpeg = await captureScreen();
+                const desc = await describeScreenshot({
+                  apiKey: settings.deepseekApiKey,
+                  baseUrl: settings.deepseekBaseUrl,
+                  model: settings.visionModel || settings.deepseekModel || "deepseek-flash",
+                  jpegBuffer: jpeg,
+                  extraHint: userText,
+                });
+                usedVision = true;
+                toolResult = desc || "看不太清";
+              } finally {
+                if (notifyCapture) await notifyCapture(false);
+              }
             }
           }
           messages.push({
@@ -241,5 +261,8 @@ module.exports = {
   runAgentTurn,
   getHistory,
   pushHistory,
+  clearSessions,
   buildSystemPrompt,
+  MAX_ROUNDS,
+  MAX_TURN_MS,
 };

@@ -1,5 +1,7 @@
 const { BrowserWindow, screen, desktopCapturer } = require("electron");
 const { state, BUBBLE_SLOT, appFile, loadSettings, currentPack, clamp } = require("./state");
+const { browserWebPreferences, hardenWindow } = require("./window-guard");
+const captureNotice = require("./capture-notice");
 
 function rememberPetOuterSize() {
   if (!state.petWindow || state.petWindow.isDestroyed()) return;
@@ -88,6 +90,7 @@ async function capturePrimaryJpeg() {
   const thumbH = Math.min(720, size.height);
   const hidden = state.petWindow && !state.petWindow.isDestroyed() && state.petWindow.isVisible();
   if (hidden) state.petWindow.hide();
+  captureNotice.concealForGrab();
   await new Promise((r) => setTimeout(r, 80));
   try {
     const sources = await desktopCapturer.getSources({
@@ -99,6 +102,7 @@ async function capturePrimaryJpeg() {
     if (!match) throw new Error("no screen source");
     return match.thumbnail.toJPEG(70);
   } finally {
+    captureNotice.restoreAfterGrab();
     if (hidden && state.petWindow && !state.petWindow.isDestroyed()) {
       state.petWindow.showInactive();
     }
@@ -122,12 +126,9 @@ function createPetWindow() {
     skipTaskbar: true,
     alwaysOnTop: settings.alwaysOnTop,
     hasShadow: false,
-    webPreferences: {
-      preload: appFile("preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: browserWebPreferences(),
   });
+  hardenWindow(state.petWindow);
 
   state.petWindow.setAlwaysOnTop(settings.alwaysOnTop, "screen-saver");
   state.petWindow.loadFile(appFile("renderer", "index.html"));

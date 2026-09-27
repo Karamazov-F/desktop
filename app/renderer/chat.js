@@ -30,7 +30,7 @@ function applyHint(settings) {
   if (settings?.deepseekEnabled && settings?.hasDeepseekKey) bits.push("DeepSeek 对话开");
   else bits.push("本地规则（DeepSeek 关）");
   bits.push(settings?.memoryEnabled ? "记忆开" : "记忆关");
-  bits.push(settings?.visionEnabled ? "截屏感知开" : "截屏关");
+  bits.push(settings?.visionEnabled ? "允许查看屏幕" : "不查看屏幕");
   if (settings?.voiceHotkey) voiceHotkey = settings.voiceHotkey;
   const voiceLabel = String(voiceHotkey || "")
     .replace("CommandOrControl", "Ctrl")
@@ -73,6 +73,9 @@ async function init() {
       p.classList.add("think");
     }
   });
+  window.petApi.onChatCleared?.(() => {
+    logEl.replaceChildren();
+  });
   window.petApi.onChatTurn?.((payload) => {
     const said = asText(payload?.user);
     if (said) addRow("user", `我：${said}`);
@@ -112,7 +115,7 @@ async function send(textOverride) {
     if (res?.source && res.source !== "deepseek") {
       addRow("meta", res.error ? `回退本地（${res.error}）` : `来源：${res.source}`);
     }
-    if (res?.usedVision) addRow("meta", "已看过屏幕（截屏感知）");
+    if (res?.usedVision) addRow("meta", "已查看屏幕，画面已发送");
   } catch (err) {
     think.remove();
     addRow("meta", String(err.message || err));

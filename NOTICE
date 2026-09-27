@@ -1,0 +1,5 @@
+桌宠包含三类许可，不要混在一起看：
+
+- `app/` 里的程序代码：MIT，见 LICENSE。
+- `packs/xiao-jing/` 里的小鲸形象、立绘和动画：all rights reserved。pack.json 的 license 字段写的是 All-Rights-Reserved。MIT 不覆盖这些素材，请勿再分发。
+- `app/renderer/fonts/LXGWWenKai-Regular.woff2`：霞鹜文楷，SIL Open Font License 1.1，见 app/renderer/fonts/OFL-LXGWWenKai.txt。

@@ -1,0 +1,58 @@
+name: Windows installer
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Fetch pinned voice runtime
+        run: node scripts/fetch-vendor.js
+
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build NSIS installer
+        working-directory: app
+        shell: bash
+        env:
+          CSC_LINK_SECRET: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_SECRET: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          export CSC_IDENTITY_AUTO_DISCOVERY=false
+          if [ -n "${CSC_LINK_SECRET}" ]; then
+            export CSC_IDENTITY_AUTO_DISCOVERY=true
+            export CSC_LINK="${CSC_LINK_SECRET}"
+            export CSC_KEY_PASSWORD="${CSC_KEY_PASSWORD_SECRET}"
+          fi
+          npx electron-builder --win nsis --x64
+
+      - name: Upload setup executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-pet-setup
+          path: app/dist/*.exe
+          if-no-files-found: error
+
+      - name: Attach installer to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/dist/*.exe

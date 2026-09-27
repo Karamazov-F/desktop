@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { decryptToDir, isDpetFile } = require("./dpet");
 const { ensureDir, packCacheDir } = require("./paths");
+const { isSafePackId, resolveInside } = require("./safe-path");
 
 function listPacks(packsDir) {
   return listPacksFromDirs([packsDir]);
@@ -51,15 +52,31 @@ function readDpetPack(filePath, cacheDir) {
 
 function importDpet(filePath, importedDir, cacheDir) {
   ensureDir(importedDir);
-  const destFile = path.join(importedDir, path.basename(filePath));
+  const base = path.basename(filePath);
+  if (!isDpetFile(base) || base !== path.basename(base) || base.includes("..")) {
+    throw new Error("角色包文件名不合法");
+  }
+  const destFile = resolveInside(importedDir, base);
   fs.copyFileSync(filePath, destFile);
-  return readDpetPack(destFile, cacheDir);
+  const pack = readDpetPack(destFile, cacheDir);
+  if (!pack || !isSafePackId(pack.id)) throw new Error("角色包无效");
+  return pack;
 }
 
 function importFolder(srcDir, importedDir) {
+  const manifestPath = path.join(srcDir, "pack.json");
+  if (!fs.existsSync(manifestPath)) throw new Error("文件夹里没有有效的 pack.json / idle");
+  let raw;
+  try {
+    raw = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch {
+    throw new Error("文件夹里没有有效的 pack.json / idle");
+  }
+  const id = (raw && raw.id) || path.basename(srcDir);
+  if (!isSafePackId(id)) throw new Error("角色包 id 不合法");
   const pack = readPack(path.dirname(srcDir), path.basename(srcDir));
-  if (!pack) throw new Error("文件夹里没有有效的 pack.json / idle");
-  const dest = path.join(importedDir, pack.id);
+  if (!pack || !isSafePackId(pack.id)) throw new Error("文件夹里没有有效的 pack.json / idle");
+  const dest = resolveInside(importedDir, pack.id);
   copyDir(srcDir, dest);
   return readPack(importedDir, pack.id);
 }
@@ -82,7 +99,12 @@ function copyDir(src, dest) {
  */
 function normalizeState(dir, key, value) {
   if (typeof value === "string") {
-    const abs = path.join(dir, value);
+    let abs;
+    try {
+      abs = resolveInside(dir, value);
+    } catch {
+      return null;
+    }
     if (!fs.existsSync(abs)) return null;
     return {
       name: key,
@@ -99,7 +121,12 @@ function normalizeState(dir, key, value) {
       : [];
   const frames = [];
   for (const rel of rels) {
-    const abs = path.join(dir, rel);
+    let abs;
+    try {
+      abs = resolveInside(dir, String(rel));
+    } catch {
+      continue;
+    }
     if (fs.existsSync(abs)) frames.push(pathToFileUrl(abs));
   }
   if (!frames.length) return null;
@@ -118,7 +145,13 @@ function normalizeState(dir, key, value) {
 }
 
 function readPack(packsDir, packId) {
-  const dir = path.join(packsDir, packId);
+  if (!isSafePackId(packId)) return null;
+  let dir;
+  try {
+    dir = resolveInside(packsDir, packId);
+  } catch {
+    return null;
+  }
   const manifestPath = path.join(dir, "pack.json");
   if (!fs.existsSync(manifestPath)) return null;
   const raw = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
@@ -128,12 +161,14 @@ function readPack(packsDir, packId) {
     if (normalized) states[key] = normalized;
   }
   if (!states.idle) return null;
+  const id = raw.id || packId;
+  if (!isSafePackId(id)) return null;
   const persona =
     raw.persona && typeof raw.persona === "object" ? raw.persona : null;
   const dialogue =
     raw.dialogue && typeof raw.dialogue === "object" ? raw.dialogue : null;
   return {
-    id: raw.id || packId,
+    id,
     name: (persona && persona.displayName) || raw.name || packId,
     version: raw.version || "0.1.0",
     author: raw.author || "",

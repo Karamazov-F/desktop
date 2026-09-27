@@ -40,7 +40,7 @@ wrap.addEventListener("mouseleave", closeSub);
 
 async function init() {
   const data = (await window.petApi.getPetMenu?.()) || { actions: [] };
-  subPanel.innerHTML = "";
+  while (subPanel.firstChild) subPanel.removeChild(subPanel.firstChild);
   for (const a of data.actions || []) {
     const b = document.createElement("button");
     b.type = "button";

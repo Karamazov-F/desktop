@@ -58,6 +58,10 @@ function clearMemory(userData, packId) {
   return saveMemory(userData, packId, emptyMemory());
 }
 
+function clearAllMemory(userData) {
+  fs.rmSync(memoryDir(userData), { recursive: true, force: true });
+}
+
 function memoryPromptBlock(mem) {
   if (!mem) return "";
   const facts = (mem.facts || []).slice(-40);
@@ -73,6 +77,7 @@ module.exports = {
   rememberFact,
   forgetFacts,
   clearMemory,
+  clearAllMemory,
   memoryPromptBlock,
   emptyMemory,
 };

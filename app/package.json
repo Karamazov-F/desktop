@@ -1,19 +1,83 @@
 {
   "name": "desktop-pet-custom",
+  "productName": "桌宠",
   "version": "0.1.0",
   "private": true,
-  "description": "Open-source swappable desktop pet (character packs first)",
+  "description": "一只待在桌面上的小鲸",
+  "author": "desktop-pet-custom contributors",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "fetch-vendor": "node ../scripts/fetch-vendor.js",
+    "predist": "node ../scripts/fetch-vendor.js",
+    "dist": "electron-builder --win nsis --x64",
+    "test": "node --test ../test/*.js"
   },
   "engines": {
     "node": ">=18"
   },
   "devDependencies": {
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "koffi": "^3.3.1"
+  },
+  "build": {
+    "appId": "app.desktop-pet.custom",
+    "productName": "桌宠",
+    "artifactName": "桌宠-Setup-${version}.${ext}",
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/koffi/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "!vendor/**",
+      "!dist/**",
+      "!**/*.md"
+    ],
+    "extraResources": [
+      {
+        "from": "../packs",
+        "to": "packs"
+      },
+      {
+        "from": "vendor/voice",
+        "to": "voice"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "zh_CN"
+      ],
+      "language": "2052",
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "桌宠",
+      "uninstallDisplayName": "桌宠",
+      "displayLanguageSelector": false,
+      "include": "build/installer.nsh",
+      "deleteAppDataOnUninstall": false
+    }
   }
 }

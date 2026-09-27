@@ -28,8 +28,8 @@ function fill(s) {
     showHotkey($("voiceHotkey"), s.voiceHotkey);
   }
   $("keyHint").textContent = s.hasDeepseekKey
-    ? `已保存 Key：${s.deepseekApiKeyMasked}`
-    : "尚未保存 Key。也可把 Key 放在仓库根目录 secrets.local.json（不会进 git）。";
+    ? `已保存 Key：${s.deepseekApiKeyMasked}（系统加密，不明文存放）`
+    : "尚未保存 Key。Key 会用系统加密保存在本机。";
 }
 
 function bindCapture(el) {
@@ -98,7 +98,13 @@ $("save").addEventListener("click", async () => {
   };
   const key = $("deepseekApiKey").value.trim();
   if (key) partial.deepseekApiKey = key;
-  const next = await window.petApi.saveSettings(partial);
+  let next;
+  try {
+    next = await window.petApi.saveSettings(partial);
+  } catch (err) {
+    $("status").textContent = String(err.message || err);
+    return;
+  }
   $("deepseekApiKey").value = "";
   fill(next);
   const bind = next.hotkeyBind || {};
@@ -110,14 +116,14 @@ $("save").addEventListener("click", async () => {
     : "已保存。快捷键立即生效。";
 });
 
-$("clearMem").addEventListener("click", async () => {
-  await window.petApi.clearMemory();
-  $("status").textContent = "当前角色记忆已清空。";
+$("clearAll").addEventListener("click", async () => {
+  if (!window.confirm("清除全部聊天记录和记忆？此操作不能撤销。")) return;
+  await window.petApi.clearAllLocal();
+  $("status").textContent = "已清除全部聊天记录和记忆。";
 });
 
 $("importDpet").addEventListener("click", () => window.petApi.importPack());
 $("importFolder").addEventListener("click", () => window.petApi.importPackFolder());
-$("deps").addEventListener("click", () => window.petApi.openDeps());
 
 init().catch((err) => {
   $("status").textContent = String(err.message || err);

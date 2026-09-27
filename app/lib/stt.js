@@ -2,20 +2,43 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const deps = require("./deps");
 const paths = require("./paths");
 
-const WORKER = path.join(__dirname, "..", "workers", "sherpa-stt-worker.js");
+const WORKER_NAME = "sherpa-stt-worker.js";
+const REQUEST_TIMEOUT_MS = 25000;
+const READY_TIMEOUT_MS = 60000;
 
 let proc = null;
 let starting = null;
 let seq = 0;
 const pending = new Map();
 let lineBuf = "";
-let ctxRef = null;
 
-function setContext(ctx) {
-  ctxRef = ctx;
+function runtimePaths() {
+  const root = paths.voiceRuntimeDir();
+  return {
+    root,
+    node: path.join(root, "node.exe"),
+    modelDir: path.join(root, "models", "sensevoice-small"),
+    worker: path.join(root, WORKER_NAME),
+    modules: path.join(root, "node_modules"),
+    dllDir: path.join(root, "node_modules", "sherpa-onnx-win-x64"),
+  };
+}
+
+function assertReady() {
+  const rt = runtimePaths();
+  const model = path.join(rt.modelDir, "model.int8.onnx");
+  const tokens = path.join(rt.modelDir, "tokens.txt");
+  if (
+    !fs.existsSync(rt.node) ||
+    !fs.existsSync(rt.worker) ||
+    !fs.existsSync(model) ||
+    !fs.existsSync(tokens)
+  ) {
+    throw new Error("语音组件未随安装包提供，请重新安装桌宠。");
+  }
+  return rt;
 }
 
 function handleLine(line) {
@@ -66,42 +89,45 @@ function ensureWorker() {
   if (proc && !proc.killed) return Promise.resolve();
   if (starting) return starting;
   starting = new Promise((resolve, reject) => {
-    if (!ctxRef) {
-      reject(new Error("stt context missing"));
-      return;
-    }
+    let rt;
     try {
-      deps.requireReady(ctxRef, ["node", "ffmpeg", "sherpa-onnx", "sensevoice-small"]);
+      rt = assertReady();
     } catch (err) {
       reject(err);
       return;
     }
-    const node = deps.nodeBin(ctxRef);
-    const files = deps.senseVoiceFiles(ctxRef);
-    const child = spawn(node, [WORKER, files.dir], {
+    const pathKey = process.platform === "win32" ? "Path" : "PATH";
+    const child = spawn(rt.node, [rt.worker, rt.modelDir], {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
+      cwd: rt.root,
       env: {
         ...process.env,
-        NODE_PATH: path.join(ctxRef.depsRoot, "node_modules"),
+        NODE_PATH: rt.modules,
+        [pathKey]: [rt.dllDir, rt.root, process.env[pathKey] || process.env.PATH || ""]
+          .filter(Boolean)
+          .join(path.delimiter),
       },
-      cwd: ctxRef.depsRoot,
     });
     proc = child;
     attach(child);
     const timer = setTimeout(() => {
       pending.delete("ready");
       reject(new Error("SenseVoice 启动超时"));
-    }, 60000);
+    }, READY_TIMEOUT_MS);
     pending.set("ready", {
       resolve: (msg) => {
         clearTimeout(timer);
         resolve(msg);
       },
-      reject,
+      reject: (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
     });
     child.on("error", (err) => {
       clearTimeout(timer);
+      pending.delete("ready");
       reject(err);
     });
   }).finally(() => {
@@ -117,53 +143,36 @@ function sendRequest(obj) {
       reject(new Error("sherpa worker not running"));
       return;
     }
-    pending.set(id, { resolve, reject });
+    const timer = setTimeout(() => {
+      if (!pending.has(id)) return;
+      pending.delete(id);
+      reject(new Error("语音识别超时"));
+    }, REQUEST_TIMEOUT_MS);
+    pending.set(id, {
+      resolve: (msg) => {
+        clearTimeout(timer);
+        resolve(msg);
+      },
+      reject: (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    });
     proc.stdin.write(JSON.stringify({ ...obj, id }) + "\n");
   });
 }
 
-async function toWav16k(inputPath) {
-  const ffmpeg = deps.findFfmpeg(ctxRef || {});
-  if (!ffmpeg) throw new Error("未找到 ffmpeg，请先一键安装依赖");
-  const out = path.join(os.tmpdir(), `pet-stt-${Date.now()}.wav`);
-  await new Promise((resolve, reject) => {
-    const p = spawn(
-      ffmpeg,
-      ["-y", "-i", inputPath, "-ac", "1", "-ar", "16000", "-f", "wav", out],
-      { windowsHide: true }
-    );
-    let stderr = "";
-    p.stderr.on("data", (d) => (stderr += d.toString()));
-    p.on("error", reject);
-    p.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(stderr.slice(-800) || "ffmpeg wav failed"));
-    });
-  });
-  return out;
-}
-
-async function transcribeBuffer(buffer, ext = "webm") {
+async function transcribeBuffer(buffer) {
   await ensureWorker();
-  // ext may arrive as a raw MIME type ("audio/webm;codecs=opus") — normalize
-  // to a bare extension or the "/" would turn the temp path into a subdir.
-  const bareExt = String(ext).toLowerCase().includes("wav") ? "wav" : "webm";
-  const raw = path.join(os.tmpdir(), `pet-rec-${Date.now()}.${bareExt}`);
-  fs.writeFileSync(raw, buffer);
-  let wav = raw;
+  const wav = path.join(os.tmpdir(), `pet-rec-${Date.now()}.wav`);
+  fs.writeFileSync(wav, buffer);
   try {
-    if (bareExt !== "wav") wav = await toWav16k(raw);
     const result = await sendRequest({ path: wav });
     return String(result.text || "").trim();
   } finally {
     try {
-      fs.unlinkSync(raw);
+      fs.unlinkSync(wav);
     } catch (_) {}
-    if (wav !== raw) {
-      try {
-        fs.unlinkSync(wav);
-      } catch (_) {}
-    }
   }
 }
 
@@ -183,17 +192,10 @@ function shutdown() {
   proc = null;
 }
 
-function defaultCtx(userData, settings) {
-  const root = paths.depsRoot(userData);
-  paths.ensureDir(root);
-  return { depsRoot: root, settings: settings || {}, onProgress: null };
-}
-
 module.exports = {
-  setContext,
   transcribeBuffer,
   warmup,
   shutdown,
   ensureWorker,
-  defaultCtx,
+  REQUEST_TIMEOUT_MS,
 };

@@ -2,6 +2,8 @@ const fs = require("fs");
 const path = require("path");
 const { ensureDir } = require("./paths");
 
+const CHAT_CAP = 100;
+
 function chatLogPath(userData, packId) {
   return path.join(userData, "chats", `${packId}.json`);
 }
@@ -12,7 +14,7 @@ function loadChat(userData, packId) {
     if (fs.existsSync(p)) {
       const raw = JSON.parse(fs.readFileSync(p, "utf8"));
       const messages = Array.isArray(raw.messages) ? raw.messages : [];
-      return messages.slice(-20);
+      return messages.slice(-CHAT_CAP);
     }
   } catch (_) {}
   return [];
@@ -35,7 +37,7 @@ function appendChat(userData, packId, role, text) {
     text: toText(text).slice(0, 2000),
     at: new Date().toISOString(),
   });
-  const next = messages.slice(-20);
+  const next = messages.slice(-CHAT_CAP);
   ensureDir(path.dirname(chatLogPath(userData, packId)));
   fs.writeFileSync(
     chatLogPath(userData, packId),
@@ -45,4 +47,8 @@ function appendChat(userData, packId, role, text) {
   return next;
 }
 
-module.exports = { loadChat, appendChat };
+function clearAllChats(userData) {
+  fs.rmSync(path.join(userData, "chats"), { recursive: true, force: true });
+}
+
+module.exports = { loadChat, appendChat, clearAllChats, CHAT_CAP };

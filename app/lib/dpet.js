@@ -21,6 +21,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
+const { resolveInside } = require("./safe-path");
 
 const MAGIC = Buffer.from("DPET");
 const PAYLOAD_MAGIC = Buffer.from("DP01");
@@ -87,20 +88,15 @@ function decodePayload(buf) {
   return files;
 }
 
-function encryptDir(dir, destPath, meta = {}) {
-  const files = collectFiles(dir);
-  if (!files.some((f) => f.rel === "pack.json")) {
-    throw new Error("pack.json missing");
-  }
-  const rawJson = JSON.parse(fs.readFileSync(path.join(dir, "pack.json"), "utf8"));
+function encryptFiles(files, destPath, meta = {}) {
   const headerObj = {
     alg: "aes-256-gcm",
     kdf: "hkdf-sha256",
     salt: "",
-    id: meta.id || rawJson.id || path.basename(dir),
-    name: meta.name || rawJson.name || rawJson.persona?.displayName || "",
-    version: meta.version || rawJson.version || "1.0.0",
-    size: rawJson.size || { width: 128, height: 128 },
+    id: meta.id || "pack",
+    name: meta.name || "",
+    version: meta.version || "1.0.0",
+    size: meta.size || { width: 128, height: 128 },
   };
   const salt = crypto.randomBytes(16);
   headerObj.salt = salt.toString("base64");
@@ -127,6 +123,24 @@ function encryptDir(dir, destPath, meta = {}) {
     fs.writeFileSync(destPath, out);
   }
   return { buffer: out, header: headerObj, path: destPath };
+}
+
+function encryptDir(dir, destPath, meta = {}) {
+  const collected = collectFiles(dir);
+  if (!collected.some((f) => f.rel === "pack.json")) {
+    throw new Error("pack.json missing");
+  }
+  const rawJson = JSON.parse(fs.readFileSync(path.join(dir, "pack.json"), "utf8"));
+  const files = collected.map((f) => ({
+    rel: f.rel,
+    data: fs.readFileSync(f.abs),
+  }));
+  return encryptFiles(files, destPath, {
+    id: meta.id || rawJson.id || path.basename(dir),
+    name: meta.name || rawJson.name || rawJson.persona?.displayName || "",
+    version: meta.version || rawJson.version || "1.0.0",
+    size: rawJson.size || { width: 128, height: 128 },
+  });
 }
 
 function parseArchive(buf) {
@@ -156,11 +170,14 @@ function parseArchive(buf) {
 
 function decryptToDir(srcPath, destDir) {
   const parsed = parseArchive(fs.readFileSync(srcPath));
-  fs.mkdirSync(destDir, { recursive: true });
+  const writes = [];
   for (const f of parsed.files) {
-    const abs = path.join(destDir, f.rel);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, f.data);
+    writes.push({ abs: resolveInside(destDir, f.rel), data: f.data });
+  }
+  fs.mkdirSync(destDir, { recursive: true });
+  for (const file of writes) {
+    fs.mkdirSync(path.dirname(file.abs), { recursive: true });
+    fs.writeFileSync(file.abs, file.data);
   }
   return { dir: destDir, header: parsed.header };
 }
@@ -171,6 +188,7 @@ function isDpetFile(filePath) {
 
 module.exports = {
   encryptDir,
+  encryptFiles,
   decryptToDir,
   parseArchive,
   isDpetFile,

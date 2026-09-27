@@ -45,6 +45,7 @@ async function handleTranscribedText(text, { autoSend = true } = {}) {
       userText: cleaned,
       userData: userData(),
       captureScreen: pet.capturePrimaryJpeg,
+      notifyCapture: (on) => require("./ipc").notifyCapture(on),
       applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
       applyMove: (dir, dist) => pet.movePet(dir, dist),
     });

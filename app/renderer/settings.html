@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
   <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file: blob:; font-src 'self'; media-src 'self' blob: mediastream:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'" />
+
     <meta charset="UTF-8" />
     <title>设置</title>
     <link rel="stylesheet" href="./fonts.css" />
@@ -16,7 +18,7 @@
     </header>
     <main>
       <h1>设置</h1>
-      <p class="hint">Key 只存在本机。文本模型不能看图；截屏走图像输入，且需手动打开。</p>
+      <p class="hint">Key 用系统加密存在本机。文字会发给 DeepSeek。查看屏幕默认关闭，打开后截图才会发给视觉接口。</p>
 
       <section>
         <h2>对话</h2>
@@ -86,25 +88,26 @@
       </section>
 
       <section>
-        <h2>记忆</h2>
+        <h2>记忆与屏幕</h2>
         <label class="toggle">
           <input id="memoryEnabled" type="checkbox" />
           <i></i>
-          <span>长期记忆</span>
+          <span>记住对话</span>
         </label>
+        <p class="hint">默认关闭。打开后，对话摘要和你让它记住的内容保存在本机。</p>
         <label class="toggle">
           <input id="visionEnabled" type="checkbox" />
           <i></i>
-          <span>截屏感知</span>
+          <span>允许查看屏幕</span>
         </label>
+        <p class="hint">默认关闭。打开后，只有你让它看屏幕时才会截图，并在画面上提示。碎碎念不会截屏。</p>
       </section>
 
       <div class="actions">
         <button type="button" class="primary" id="save">保存</button>
-        <button type="button" id="clearMem">清空记忆</button>
+        <button type="button" id="clearAll">清除全部聊天记录和记忆</button>
         <button type="button" id="importDpet">导入 .dpet</button>
         <button type="button" id="importFolder">导入文件夹</button>
-        <button type="button" id="deps">环境依赖</button>
       </div>
       <p id="status" class="status"></p>
     </main>

@@ -1,30 +1,59 @@
-const { app, screen, session, globalShortcut } = require("electron");
-const fs = require("fs");
+const { app, screen, session, globalShortcut, dialog, BrowserWindow } = require("electron");
 const path = require("path");
 const stt = require("../lib/stt");
-const deps = require("../lib/deps");
 const hotkeys = require("../lib/hotkeys");
-const { ensureDesktopShortcut } = require("../lib/shortcut");
-const { state, userData, loadSettings, saveSettings, depsCtx } = require("./state");
+const { state, userData, loadSettings, saveSettings } = require("./state");
 const { registerIpc } = require("./ipc");
 
+const PRIVACY_DETAIL = [
+  "文字对话：你输入的内容、角色设定，以及（若打开「记住对话」）本机保存的记忆摘要，会发送到你填写的 DeepSeek 接口（默认 https://api.deepseek.com）。没有 API Key 时只用本机台词，不联网聊天。",
+  "",
+  "查看屏幕：默认关闭。打开后，只有你让它看屏幕时才会截取主屏幕，并在画面上明确提示。截图会发给视觉接口。碎碎念不会截屏。",
+  "",
+  "语音：在本机识别，录音不会上传。",
+  "",
+  "本机保存：API Key 用系统加密保存。聊天记录（最多最近 100 条）和记忆位于",
+  "%APPDATA%\\desktop-pet",
+  "可在设置里关闭记忆、关闭查看屏幕，或一键清除全部聊天记录和记忆。",
+].join("\n");
+
+function isAppContents(contents) {
+  if (!contents || contents.isDestroyed()) return false;
+  const win = BrowserWindow.fromWebContents(contents);
+  return Boolean(win && !win.isDestroyed());
+}
+
 function start() {
+  app.setPath("userData", path.join(app.getPath("appData"), "desktop-pet"));
+  const gotLock = app.requestSingleInstanceLock();
+  if (!gotLock) {
+    app.quit();
+    return;
+  }
+  app.on("second-instance", () => {
+    const win = state.petWindow;
+    if (!win || win.isDestroyed()) return;
+    if (!win.isVisible()) win.show();
+    win.focus();
+  });
+
   registerIpc();
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     const pet = require("./pet-window");
     const windows = require("./windows");
     const tray = require("./tray");
-    const compose = require("./compose");
 
-    pathsReady();
-    const ctx = depsCtx();
-    stt.setContext(ctx);
-    session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-      callback(permission === "media" || permission === "microphone" || permission === "audioCapture");
+    require("../lib/paths").ensureDir(userData());
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => {
+      const mic =
+        permission === "media" || permission === "microphone" || permission === "audioCapture";
+      callback(Boolean(mic && isAppContents(wc)));
     });
-    session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
-      return permission === "media" || permission === "microphone" || permission === "audioCapture";
+    session.defaultSession.setPermissionCheckHandler((wc, permission) => {
+      const mic =
+        permission === "media" || permission === "microphone" || permission === "audioCapture";
+      return Boolean(mic && isAppContents(wc));
     });
     pet.createPetWindow();
     try {
@@ -32,19 +61,7 @@ function start() {
     } catch (err) {
       console.warn("tray failed", err);
     }
-    try {
-      ensureDesktopShortcut({
-        electronPath: process.execPath,
-        appDir: path.resolve(__dirname, ".."),
-        desktopDir: app.getPath("desktop"),
-      });
-    } catch (err) {
-      console.warn("shortcut", err.message);
-    }
-    const rows = deps.scan(ctx);
-    const missing = deps.missingRequired(rows);
-    if (missing.length) windows.openSetupWindow();
-    else stt.warmup();
+    stt.warmup();
 
     if (process.env.PET_OPEN_CHAT === "1") windows.revealPetChat({ history: true });
     if (process.env.PET_OPEN_SETTINGS === "1") windows.openSettingsWindow();
@@ -57,18 +74,31 @@ function start() {
     if (s0.hidden) state.petWindow?.hide();
     tray.applyAlwaysOnTop(s0.alwaysOnTop);
 
-    if (!s0.onboarded) {
+    if (!s0.privacyAccepted) {
+      await dialog.showMessageBox({
+        type: "info",
+        title: "隐私说明",
+        message: "桌宠如何使用你的数据",
+        detail: PRIVACY_DETAIL,
+        buttons: ["我知道了"],
+        noLink: true,
+      });
+      saveSettings({ privacyAccepted: true });
+    }
+
+    const s1 = loadSettings();
+    if (!s1.onboarded) {
       setTimeout(() => {
         pet.sendPlay(null, "点我会挥手；按住拖我。打字用托盘或右键。");
         setTimeout(
-          () => pet.sendPlay(null, `${hotkeys.formatDisplay(s0.voiceHotkey)} 说话，关窗口也能聊。`),
+          () => pet.sendPlay(null, `${hotkeys.formatDisplay(s1.voiceHotkey)} 说话，关窗口也能聊。`),
           3500
         );
         setTimeout(
           () =>
             pet.sendPlay(
               null,
-              `${hotkeys.formatDisplay(s0.hideHotkey)} 隐藏/显示；托盘左键对话。`
+              `${hotkeys.formatDisplay(s1.hideHotkey)} 隐藏/显示；托盘左键对话。`
             ),
           7000
         );
@@ -84,7 +114,7 @@ function start() {
         const fs = d.bounds.width === d.workArea.width && d.bounds.height === d.workArea.height;
         if (fs && !state.hiddenByFullscreen && !s.hidden) {
           state.hiddenByFullscreen = true;
-          compose.closeComposeWindow();
+          require("./compose").closeComposeWindow();
           state.petWindow.hide();
         } else if (!fs && state.hiddenByFullscreen && !s.hidden) {
           state.hiddenByFullscreen = false;
@@ -104,17 +134,4 @@ function start() {
   });
 }
 
-function pathsReady() {
-  const paths = require("../lib/paths");
-  paths.ensureDir(userData());
-  const settingsFile = path.join(userData(), "settings.json");
-  if (!fs.existsSync(settingsFile)) {
-    const s = loadSettings();
-    saveSettings({
-      deepseekApiKey: s.deepseekApiKey,
-      deepseekEnabled: Boolean(s.deepseekApiKey),
-    });
-  }
-}
-
-module.exports = { start };
+module.exports = { start, PRIVACY_DETAIL };
