@@ -25,6 +25,12 @@ function addRow(cls, text) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+function addFallbackRow(reply) {
+  const note = window.PetUserErrors?.replyFallbackNote?.(reply);
+  if (note) addRow("meta", note);
+  if (reply?.usedVision) addRow("meta", "已查看屏幕，画面已发送");
+}
+
 function applyHint(settings) {
   const bits = [];
   if (settings?.deepseekEnabled && settings?.hasDeepseekKey) bits.push("DeepSeek 对话开");
@@ -83,6 +89,7 @@ async function init() {
     if (reply?.text) {
       addRow("bot", `${reply.displayName || "桌宠"}：${asText(reply.text)}`);
     }
+    addFallbackRow(reply);
   });
   window.petApi.onVoiceState?.((s) => {
     if (!micBtn) return;
@@ -97,6 +104,7 @@ async function init() {
       const name = reply.displayName || "桌宠";
       addRow("bot", `${name}：${asText(reply.text)}`);
     }
+    addFallbackRow(reply);
   });
 }
 
@@ -112,12 +120,7 @@ async function send(textOverride) {
     think.remove();
     const name = res?.displayName || "桌宠";
     addRow("bot", `${name}：${res?.text || "…"}`);
-    if (res?.source && res.source !== "deepseek") {
-      const note =
-        res.error || (res.source === "local" ? "来源：本地回复" : "这次先用本地回复");
-      addRow("meta", note);
-    }
-    if (res?.usedVision) addRow("meta", "已查看屏幕，画面已发送");
+    addFallbackRow(res);
   } catch (err) {
     console.error(err);
     think.remove();

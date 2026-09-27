@@ -6,13 +6,13 @@ const TOO_EARLY = "没听清，按住稍久一点再说";
 const VOICE_PROCESS_FAILED = "语音处理出错，请再试一次";
 const LOCAL_REPLY = "这次先用本地回复";
 const NO_REPLY = "这次没能回复，请再试一次";
-const TIMEOUT_REPLY = "这次回复超时了，这次先用本地回复";
-const NETWORK_REPLY = "连不上 DeepSeek，请检查网络，这次先用本地回复";
+const TIMEOUT_REPLY = "回复超时了；这次先用本地回复";
+const NETWORK_REPLY = "连不上 DeepSeek，请检查网络；这次先用本地回复";
 const BALANCE_REPLY = "DeepSeek 账户余额不足，请到 DeepSeek 开放平台充值；这次先用本地回复";
 const KEY_INVALID = "API Key 无效，请到设置里重新填写；这次先用本地回复";
 const KEY_FORBIDDEN = "没有权限访问 DeepSeek，请检查账号状态；这次先用本地回复";
 const RATE_LIMIT = "请求太频繁，稍等一下再试；这次先用本地回复";
-const UNKNOWN_REPLY = "这次没能从 DeepSeek 得到回复，这次先用本地回复";
+const UNKNOWN_REPLY = "没能从 DeepSeek 得到回复；这次先用本地回复";
 
 const FIELD_LABELS = {
   deepseekEnabled: "DeepSeek",
@@ -67,7 +67,7 @@ function userFacingError(err) {
     return NETWORK_REPLY;
   }
   if (raw && /^[\u4e00-\u9fff0-9，。！？、：；「」（）()\s]+$/.test(raw)) {
-    return raw.includes(LOCAL_REPLY) ? raw : `${raw.replace(/。$/, "")}，${LOCAL_REPLY}`;
+    return raw.includes(LOCAL_REPLY) ? raw : `${raw.replace(/[。！？]$/, "")}；${LOCAL_REPLY}`;
   }
   return UNKNOWN_REPLY;
 }
@@ -106,7 +106,8 @@ function keyHintText(settings) {
     return "已保存的 Key 暂时无法读取。可以清除后重新填写。";
   }
   if (s.keyStorage === "plaintext") {
-    return "这台电脑不支持系统加密，Key 以明文保存在本机；不放心可以点“清除 API Key”。";
+    const saved = masked ? `已保存 Key：${masked}。` : "";
+    return `${saved}这台电脑不支持系统加密，Key 以明文保存在本机；不放心可以点“清除 API Key”。`;
   }
   if (s.keyStorage === "encrypted" || (s.hasDeepseekKey && !s.keyStorage)) {
     return `已保存 Key：${masked}（系统加密，不明文存放）`;
@@ -126,6 +127,11 @@ function formatKeySaveError(savedKeys) {
   }
   const savedText = labels.length ? labels.join("、") : "没有其他改动";
   return `系统加密不可用，无法保存 API Key。已保存：${savedText}。未保存：API Key。`;
+}
+
+function replyFallbackNote(reply) {
+  if (!reply || !reply.source || reply.source === "deepseek") return "";
+  return reply.error || (reply.source === "local" ? "来源：本地回复" : LOCAL_REPLY);
 }
 
 function displaySaveError(err) {
@@ -148,6 +154,7 @@ const api = {
   sttFailureMessage,
   keyHintText,
   formatKeySaveError,
+  replyFallbackNote,
   displaySaveError,
 };
 

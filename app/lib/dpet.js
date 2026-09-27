@@ -73,7 +73,7 @@ function encodePayload(files) {
 
 function need(buf, off, len) {
   if (!Number.isInteger(len) || len < 0 || off < 0 || off + len > buf.length) {
-    throw new Error("角色包内容无效");
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   }
 }
 
@@ -82,7 +82,7 @@ function decodePayload(buf) {
     throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   }
   const count = buf.readUInt32LE(4);
-  if (count > MAX_ENTRIES) throw new Error("角色包文件过多，已拒绝导入");
+  if (count > MAX_ENTRIES) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   let off = 8;
   let total = 0;
   const files = [];
@@ -90,16 +90,16 @@ function decodePayload(buf) {
     need(buf, off, 2);
     const nameLen = buf.readUInt16LE(off);
     off += 2;
-    if (nameLen > 512) throw new Error("角色包包含非法路径，已拒绝导入");
+    if (nameLen > 512) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
     need(buf, off, nameLen);
     const rel = buf.subarray(off, off + nameLen).toString("utf8");
     off += nameLen;
     need(buf, off, 4);
     const dataLen = buf.readUInt32LE(off);
     off += 4;
-    if (dataLen > MAX_FILE_BYTES) throw new Error("角色包内文件过大，已拒绝导入");
+    if (dataLen > MAX_FILE_BYTES) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
     total += dataLen;
-    if (total > MAX_OUTPUT_BYTES) throw new Error("角色包过大，已拒绝导入");
+    if (total > MAX_OUTPUT_BYTES) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
     need(buf, off, dataLen);
     const data = Buffer.from(buf.subarray(off, off + dataLen));
     off += dataLen;
@@ -109,7 +109,12 @@ function decodePayload(buf) {
 }
 
 function gunzipLimited(gz, maxOutputLength = MAX_OUTPUT_BYTES) {
-  return zlib.gunzipSync(gz, { maxOutputLength });
+  try {
+    return zlib.gunzipSync(gz, { maxOutputLength });
+  } catch (err) {
+    console.warn("gunzip", err && err.message ? err.message : err);
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+  }
 }
 
 function encryptFiles(files, destPath, meta = {}) {

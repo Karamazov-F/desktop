@@ -37,12 +37,16 @@ function cleanStagingDirs(dir) {
   }
   for (const ent of entries) {
     const abs = path.join(dir, ent.name);
-    if (ent.isDirectory() && (ent.name.startsWith(".import-") || ent.name.startsWith(".unpack-"))) {
-      fs.rmSync(abs, { recursive: true, force: true });
-      continue;
-    }
-    if (ent.isFile() && (ent.name.endsWith(".bak-import") || ent.name.endsWith(".dpet.partial"))) {
-      fs.rmSync(abs, { force: true });
+    try {
+      if (ent.isDirectory() && (ent.name.startsWith(".import-") || ent.name.startsWith(".unpack-"))) {
+        fs.rmSync(abs, { recursive: true, force: true });
+        continue;
+      }
+      if (ent.isFile() && (ent.name.endsWith(".bak-import") || ent.name.endsWith(".dpet.partial"))) {
+        fs.rmSync(abs, { force: true });
+      }
+    } catch (err) {
+      console.warn("clean staging", abs, err && (err.code || err.message));
     }
   }
 }
@@ -143,7 +147,7 @@ function importDpet(filePath, importedDir, cacheDir, io) {
   const base = path.basename(filePath);
   if (!isDpetFile(base)) throw new Error("请选择 .dpet 角色包文件");
   if (base !== path.basename(base) || base.includes("..")) {
-    throw new Error("角色包文件名不合法");
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   }
   const destFile = resolveInside(importedDir, base);
   const staging = fs.mkdtempSync(path.join(cacheDir, ".import-"));
@@ -165,7 +169,7 @@ function importDpet(filePath, importedDir, cacheDir, io) {
     const cacheDest = path.join(cacheDir, cacheKeyForDpet(destFile));
     rmSync(cacheDest, { recursive: true, force: true });
     renameSync(staging, cacheDest);
-    if (hadPrevious) fs.rmSync(backup, { force: true });
+    if (hadPrevious) rmSync(backup, { force: true });
     return readPackDir(cacheDest);
   } catch (err) {
     rollbackImport({

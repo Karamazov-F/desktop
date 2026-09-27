@@ -127,16 +127,23 @@ test("decodePayload rejects a length past the buffer and too many entries", () =
   buf.writeUInt16LE(1, 8);
   buf.write("a", 10);
   buf.writeUInt32LE(0xffffffff, 11);
-  assert.throws(() => dpet.decodePayload(buf), /无效|过大|非法/);
+  assert.throws(() => dpet.decodePayload(buf), /这个角色包无法使用，请向角色包作者重新获取/);
   const many = Buffer.alloc(8);
   many.write("DP01", 0);
   many.writeUInt32LE(dpet.MAX_ENTRIES + 1, 4);
-  assert.throws(() => dpet.decodePayload(many), /过多/);
+  assert.throws(() => dpet.decodePayload(many), /这个角色包无法使用，请向角色包作者重新获取/);
 });
 
 test("gunzipLimited stops a decompression bomb", () => {
   const gz = zlib.gzipSync(Buffer.alloc(8000));
-  assert.throws(() => dpet.gunzipLimited(gz, 100));
+  assert.throws(
+    () => dpet.gunzipLimited(gz, 100),
+    (err) => {
+      assert.match(err.message, /这个角色包无法使用，请向角色包作者重新获取/);
+      assert.doesNotMatch(err.message, /RangeError|maxOutputLength/);
+      return true;
+    }
+  );
   assert.equal(dpet.MAX_OUTPUT_BYTES, 256 * 1024 * 1024);
 });
 
@@ -324,7 +331,7 @@ test("an aborted turn does not call the network or capture the screen", async ()
   });
   assert.equal(result.source, "local-fallback");
   assert.equal(captured, false);
-  assert.match(result.error, /这次回复超时了，这次先用本地回复/);
+  assert.match(result.error, /回复超时了；这次先用本地回复/);
   assert.doesNotMatch(result.error, /网络较慢/);
   assert.doesNotMatch(result.error, /Abort|timeout|Error/i);
 });
@@ -568,6 +575,27 @@ test("hold-to-talk cancel passes the session id", () => {
   assert.match(ipcFail, /voiceCancel\?\.\(sessionId\)/);
 });
 
+test("compose and chat show a fallback note when DeepSeek did not answer", () => {
+  const root = path.join(__dirname, "..", "app", "renderer");
+  const compose = fs.readFileSync(path.join(root, "compose.js"), "utf8");
+  assert.match(compose, /res\.source !== "deepseek" && res\.error/);
+  assert.match(compose, /setHint\(res\.error\)/);
+  assert.match(compose, /PetUserErrors\?\.NO_REPLY/);
+  assert.doesNotMatch(compose, /setHint\(String\(err\.message/);
+  const chat = fs.readFileSync(path.join(root, "chat.js"), "utf8");
+  const turn = chat.slice(chat.indexOf("onChatTurn"), chat.indexOf("onVoiceState"));
+  const voice = chat.slice(chat.indexOf("onVoiceTranscript"), chat.indexOf("async function send"));
+  assert.match(turn, /addFallbackRow\(reply\)/);
+  assert.match(voice, /addFallbackRow\(reply\)/);
+  assert.match(chat, /function addFallbackRow\(reply\)/);
+  const windows = fs.readFileSync(path.join(__dirname, "..", "app", "main", "windows.js"), "utf8");
+  assert.match(windows, /已导入并切换到「\$\{name\}」/);
+  assert.doesNotMatch(windows, /已导入 \$\{pack\.name\}（\$\{pack\.id\}）/);
+  assert.match(windows, /defaultPath/);
+  const folder = windows.slice(windows.indexOf("async function importPackFolder"));
+  assert.match(folder, /finishImportedPack\(pack\)/);
+});
+
 test("model and microphone errors shown to the user are Chinese", () => {
   assert.equal(
     errors.userFacingError({ status: 401, message: "DeepSeek 401: invalid api key" }),
@@ -579,11 +607,11 @@ test("model and microphone errors shown to the user are Chinese", () => {
   );
   const aborted = new Error("思考时间过长");
   aborted.name = "AbortError";
-  assert.equal(errors.userFacingError(aborted), "这次回复超时了，这次先用本地回复");
-  assert.equal(errors.userFacingError(new Error("思考时间过长")), "这次回复超时了，这次先用本地回复");
+  assert.equal(errors.userFacingError(aborted), "回复超时了；这次先用本地回复");
+  assert.equal(errors.userFacingError(new Error("思考时间过长")), "回复超时了；这次先用本地回复");
   assert.equal(
     errors.userFacingError(new Error("getaddrinfo ENOTFOUND api.deepseek.com")),
-    "连不上 DeepSeek，请检查网络，这次先用本地回复"
+    "连不上 DeepSeek，请检查网络；这次先用本地回复"
   );
   assert.equal(
     errors.userFacingError({ status: 402, message: "Insufficient Balance" }),
@@ -592,12 +620,23 @@ test("model and microphone errors shown to the user are Chinese", () => {
   assert.equal(errors.userFacingError({ status: 429, message: "rate limit" }), "请求太频繁，稍等一下再试；这次先用本地回复");
   assert.equal(
     errors.userFacingError(new Error("DeepSeek 500: boom")),
-    "这次没能从 DeepSeek 得到回复，这次先用本地回复"
+    "没能从 DeepSeek 得到回复；这次先用本地回复"
   );
   assert.equal(
     errors.userFacingError(new Error("request failed with status 401")),
-    "这次没能从 DeepSeek 得到回复，这次先用本地回复"
+    "没能从 DeepSeek 得到回复；这次先用本地回复"
   );
+  assert.equal(errors.userFacingError(new Error("想一下。")), "想一下；这次先用本地回复");
+  assert.equal(errors.userFacingError(new Error("想一下！")), "想一下；这次先用本地回复");
+  assert.equal(errors.userFacingError(new Error("想一下？")), "想一下；这次先用本地回复");
+  assert.equal(errors.TIMEOUT_REPLY, "回复超时了；这次先用本地回复");
+  assert.equal(errors.UNKNOWN_REPLY, "没能从 DeepSeek 得到回复；这次先用本地回复");
+  assert.equal(
+    errors.replyFallbackNote({ source: "local-fallback", error: "回复超时了；这次先用本地回复" }),
+    "回复超时了；这次先用本地回复"
+  );
+  assert.equal(errors.replyFallbackNote({ source: "local", text: "嗯" }), "来源：本地回复");
+  assert.equal(errors.replyFallbackNote({ source: "deepseek", error: "nope" }), "");
   for (const sample of [
     { status: 401, message: "invalid api key" },
     { status: 403, message: "forbidden" },
@@ -635,7 +674,10 @@ test("model and microphone errors shown to the user are Chinese", () => {
   assert.equal(errors.sttFailureMessage(new Error("SenseVoice 启动超时")), "识别超时，请再说一次");
   assert.equal(errors.sttFailureMessage(new Error("sherpa worker exited")), "语音识别出错，请再试一次");
   const plain = errors.keyHintText({ keyStorage: "plaintext", deepseekApiKeyMasked: "sk-ab…wxyz" });
-  assert.equal(plain, "这台电脑不支持系统加密，Key 以明文保存在本机；不放心可以点“清除 API Key”。");
+  assert.equal(
+    plain,
+    "已保存 Key：sk-ab…wxyz。这台电脑不支持系统加密，Key 以明文保存在本机；不放心可以点“清除 API Key”。"
+  );
   assert.doesNotMatch(plain, /不明文存放/);
   const none = errors.keyHintText({ keyStorage: "none", encryptionAvailable: false });
   assert.doesNotMatch(none, /会用系统加密保存/);
@@ -648,7 +690,7 @@ test("model and microphone errors shown to the user are Chinese", () => {
   assert.equal(errors.fieldLabel("notARealField"), "其他设置");
   assert.equal(
     errors.userFacingError(Object.assign(new Error("response body exceeded limit"), { code: "EMAXBODY" })),
-    "这次没能从 DeepSeek 得到回复，这次先用本地回复"
+    "没能从 DeepSeek 得到回复；这次先用本地回复"
   );
 });
 
@@ -751,6 +793,42 @@ test("startup clears leftover import and unpack directories", () => {
   assert.equal(fs.existsSync(path.join(cache, "half.dpet.partial")), false);
   assert.equal(fs.existsSync(path.join(cache, "notes.partial")), true);
   assert.equal(fs.existsSync(path.join(cache, "keep-me")), true);
+});
+
+test("a busy leftover file does not stop the pack list", () => {
+  const parent = tmpDir();
+  const cache = path.join(parent, "cache");
+  fs.mkdirSync(cache);
+  const locked = path.join(cache, "half.dpet.partial");
+  fs.writeFileSync(locked, "partial");
+  const orig = fs.rmSync;
+  const warnings = [];
+  const origWarn = console.warn;
+  fs.rmSync = () => {
+    const err = new Error("resource busy");
+    err.code = "EBUSY";
+    throw err;
+  };
+  console.warn = (...args) => warnings.push(args.join(" "));
+  try {
+    assert.doesNotThrow(() => packs.listPacksFromDirs([parent], { cacheDir: cache }));
+  } finally {
+    fs.rmSync = orig;
+    console.warn = origWarn;
+  }
+  assert.equal(fs.existsSync(locked), true);
+  assert.match(warnings.join("\n"), /EBUSY/);
+});
+
+test("a pack file name with parent dots asks the author for a new pack", () => {
+  const parent = tmpDir();
+  const imported = path.join(parent, "imported");
+  const cache = path.join(parent, "cache");
+  fs.writeFileSync(path.join(parent, "bad..name.dpet"), "not-a-pack");
+  assert.throws(
+    () => packs.importDpet(path.join(parent, "bad..name.dpet"), imported, cache),
+    /这个角色包无法使用，请向角色包作者重新获取/
+  );
 });
 
 test("response body stays tied to the abort signal", async () => {

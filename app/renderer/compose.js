@@ -60,9 +60,12 @@ async function send() {
   syncSendReady();
   sendBtn.disabled = true;
   try {
-    await window.petApi.chat(text);
+    const res = await window.petApi.chat(text);
+    if (res && res.source !== "deepseek" && res.error) setHint(res.error);
+    else if (res) setHint("");
   } catch (err) {
-    setHint(String(err.message || err));
+    console.error(err);
+    setHint(window.PetUserErrors?.NO_REPLY || "这次没能回复，请再试一次");
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();
