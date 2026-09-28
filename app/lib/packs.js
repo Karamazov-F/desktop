@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { decryptToDir, isDpetFile, COMPLETE_MARKER } = require("./dpet");
+const { decryptToDir, isDpetFile, parseArchive, COMPLETE_MARKER } = require("./dpet");
 const { ensureDir, packCacheDir } = require("./paths");
 const { isSafePackId, resolveInside } = require("./safe-path");
 
@@ -26,8 +26,89 @@ function isPermanentPackError(err) {
   return true;
 }
 
+const FOLDER_BACKUP_SUFFIX = ".bak-folder-import";
+const DPET_BACKUP_SUFFIX = ".bak-import";
+const IMPORT_COMMITTED_SUFFIX = ".import-committed";
+
+function writeCommitMarker(marker, renameSync = fs.renameSync) {
+  const partial = `${marker}.partial`;
+  fs.writeFileSync(partial, "1");
+  renameSync(partial, marker);
+}
+
+function clearCommittedBackup(backup, marker, rmSync, recursive = false) {
+  try {
+    rmSync(backup, { recursive, force: true });
+    fs.rmSync(marker, { force: true });
+  } catch (err) {
+    // The marker makes the new pack authoritative on the next startup.
+    console.warn("clean committed import", backup, err && (err.code || err.message));
+  }
+}
+
+function validCommittedDpet(dest) {
+  if (!fs.existsSync(dest)) return false;
+  try {
+    return parseArchive(fs.readFileSync(dest)).files.some((file) => file.rel === "pack.json");
+  } catch (_) {
+    return false;
+  }
+}
+
+function recoverImportBackups(dir) {
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const backup = path.join(dir, ent.name);
+    try {
+      if (ent.isFile() && ent.name.endsWith(DPET_BACKUP_SUFFIX)) {
+        const name = ent.name.slice(0, -DPET_BACKUP_SUFFIX.length);
+        if (!isDpetFile(name)) continue;
+        const dest = resolveInside(dir, name);
+        const marker = `${dest}${IMPORT_COMMITTED_SUFFIX}`;
+        if (fs.existsSync(marker) && validCommittedDpet(dest)) {
+          clearCommittedBackup(backup, marker, fs.rmSync);
+        } else {
+          fs.renameSync(backup, dest);
+          fs.rmSync(marker, { force: true });
+        }
+      } else if (ent.isDirectory() && ent.name.endsWith(FOLDER_BACKUP_SUFFIX)) {
+        const id = ent.name.slice(0, -FOLDER_BACKUP_SUFFIX.length);
+        if (!isSafePackId(id)) continue;
+        const dest = resolveInside(dir, id);
+        const marker = `${dest}${IMPORT_COMMITTED_SUFFIX}`;
+        if (fs.existsSync(marker) && readPackDir(dest)) {
+          clearCommittedBackup(backup, marker, fs.rmSync, true);
+          continue;
+        }
+        let interrupted = null;
+        if (fs.existsSync(dest)) {
+          interrupted = fs.mkdtempSync(path.join(dir, ".import-abandoned-"));
+          fs.rmdirSync(interrupted);
+          fs.renameSync(dest, interrupted);
+        }
+        try {
+          fs.renameSync(backup, dest);
+        } catch (err) {
+          if (interrupted && !fs.existsSync(dest)) fs.renameSync(interrupted, dest);
+          throw err;
+        }
+        if (interrupted) fs.rmSync(interrupted, { recursive: true, force: true });
+        fs.rmSync(marker, { force: true });
+      }
+    } catch (err) {
+      // Leave the backup in place so a later startup can retry recovery.
+      console.warn("recover import", backup, err && (err.code || err.message));
+    }
+  }
+}
+
 function cleanStagingDirs(dir) {
   if (!dir || !fs.existsSync(dir)) return;
+  try {
+    recoverImportBackups(dir);
+  } catch (err) {
+    console.warn("recover import", dir, err && (err.code || err.message));
+    return;
+  }
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -38,11 +119,19 @@ function cleanStagingDirs(dir) {
   for (const ent of entries) {
     const abs = path.join(dir, ent.name);
     try {
+      if (ent.isFile() && ent.name.endsWith(IMPORT_COMMITTED_SUFFIX)) {
+        const name = ent.name.slice(0, -IMPORT_COMMITTED_SUFFIX.length);
+        const isPackName = isSafePackId(name) || isDpetFile(name);
+        if (isPackName && !fs.existsSync(path.join(dir, `${name}${isDpetFile(name) ? DPET_BACKUP_SUFFIX : FOLDER_BACKUP_SUFFIX}`))) {
+          fs.rmSync(abs, { force: true });
+        }
+        continue;
+      }
       if (ent.isDirectory() && (ent.name.startsWith(".import-") || ent.name.startsWith(".unpack-"))) {
         fs.rmSync(abs, { recursive: true, force: true });
         continue;
       }
-      if (ent.isFile() && (ent.name.endsWith(".bak-import") || ent.name.endsWith(".dpet.partial"))) {
+      if (ent.isFile() && (ent.name.endsWith(".dpet.partial") || ent.name.endsWith(".bak-import.partial") || ent.name.endsWith(".import-committed.partial"))) {
         fs.rmSync(abs, { force: true });
       }
     } catch (err) {
@@ -60,9 +149,11 @@ function rememberPackFailure(dest, err) {
   return true;
 }
 
-function rollbackImport({ destFile, partialFile, staging, backup, replaced, hadPrevious }) {
+function rollbackImport({ destFile, partialFile, backupPartial, marker, staging, backup, replaced, hadPrevious }) {
   fs.rmSync(staging, { recursive: true, force: true });
   fs.rmSync(partialFile, { force: true });
+  if (backupPartial) fs.rmSync(backupPartial, { force: true });
+  if (marker) fs.rmSync(`${marker}.partial`, { force: true });
   if (replaced) {
     fs.rmSync(destFile, { force: true });
     if (hadPrevious && backup && fs.existsSync(backup)) fs.renameSync(backup, destFile);
@@ -150,6 +241,9 @@ function importDpet(filePath, importedDir, cacheDir, io) {
   const staging = fs.mkdtempSync(path.join(cacheDir, ".import-"));
   const partialFile = `${destFile}.partial`;
   const backup = `${destFile}.bak-import`;
+  const backupPartial = `${backup}.partial`;
+  const marker = `${destFile}${IMPORT_COMMITTED_SUFFIX}`;
+  if (fs.existsSync(backup)) throw new Error("上次角色包导入尚未恢复，请重启桌宠后再试");
   let replaced = false;
   let hadPrevious = false;
   try {
@@ -157,7 +251,8 @@ function importDpet(filePath, importedDir, cacheDir, io) {
     const pack = readPackDir(staging);
     if (!pack || !isSafePackId(pack.id)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
     if (fs.existsSync(destFile)) {
-      copyFileSync(destFile, backup);
+      copyFileSync(destFile, backupPartial);
+      renameSync(backupPartial, backup);
       hadPrevious = true;
     }
     copyFileSync(filePath, partialFile);
@@ -166,12 +261,19 @@ function importDpet(filePath, importedDir, cacheDir, io) {
     const cacheDest = path.join(cacheDir, cacheKeyForDpet(destFile));
     rmSync(cacheDest, { recursive: true, force: true });
     renameSync(staging, cacheDest);
-    if (hadPrevious) rmSync(backup, { force: true });
-    return readPackDir(cacheDest);
+    const result = readPackDir(cacheDest);
+    if (!result) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+    if (hadPrevious) {
+      writeCommitMarker(marker, renameSync);
+      clearCommittedBackup(backup, marker, rmSync);
+    }
+    return result;
   } catch (err) {
     rollbackImport({
       destFile,
       partialFile,
+      backupPartial,
+      marker,
       staging,
       backup: hadPrevious ? backup : null,
       replaced,
@@ -181,7 +283,10 @@ function importDpet(filePath, importedDir, cacheDir, io) {
   }
 }
 
-function importFolder(srcDir, importedDir) {
+function importFolder(srcDir, importedDir, io) {
+  const copyFileSync = (io && io.copyFileSync) || fs.copyFileSync;
+  const renameSync = (io && io.renameSync) || fs.renameSync;
+  const rmSync = (io && io.rmSync) || fs.rmSync;
   const manifestPath = path.join(srcDir, "pack.json");
   if (!fs.existsSync(manifestPath)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   let raw;
@@ -192,14 +297,49 @@ function importFolder(srcDir, importedDir) {
   }
   const id = (raw && raw.id) || path.basename(srcDir);
   if (!isSafePackId(id)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
-  const pack = readPack(path.dirname(srcDir), path.basename(srcDir));
+  const pack = readPackDir(srcDir);
   if (!pack || !isSafePackId(pack.id)) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+  ensureDir(importedDir);
+  cleanStagingDirs(importedDir);
   const dest = resolveInside(importedDir, pack.id);
-  copyDir(srcDir, dest);
-  return readPack(importedDir, pack.id);
+  const backup = `${dest}${FOLDER_BACKUP_SUFFIX}`;
+  const marker = `${dest}${IMPORT_COMMITTED_SUFFIX}`;
+  if (fs.existsSync(backup)) throw new Error("上次角色包导入尚未恢复，请重启桌宠后再试");
+  const staging = fs.mkdtempSync(path.join(importedDir, ".import-folder-"));
+  let hadPrevious = false;
+  let installed = false;
+  try {
+    copyDir(srcDir, staging, copyFileSync);
+    const staged = readPackDir(staging);
+    if (!staged || staged.id !== pack.id) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+    if (fs.existsSync(dest)) {
+      renameSync(dest, backup);
+      hadPrevious = true;
+    }
+    renameSync(staging, dest);
+    installed = true;
+    const result = readPackDir(dest);
+    if (!result) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+    if (hadPrevious) {
+      writeCommitMarker(marker, renameSync);
+      clearCommittedBackup(backup, marker, rmSync, true);
+    }
+    return result;
+  } catch (err) {
+    try {
+      fs.rmSync(`${marker}.partial`, { force: true });
+      if (installed) fs.rmSync(dest, { recursive: true, force: true });
+      if (hadPrevious && fs.existsSync(backup)) fs.renameSync(backup, dest);
+      fs.rmSync(staging, { recursive: true, force: true });
+    } catch (rollbackErr) {
+      // Keep the backup for startup recovery if immediate rollback is blocked.
+      console.warn("rollback folder import", rollbackErr && (rollbackErr.code || rollbackErr.message));
+    }
+    throw err;
+  }
 }
 
-function copyDir(src, dest) {
+function copyDir(src, dest, copyFileSync = fs.copyFileSync) {
   fs.mkdirSync(dest, { recursive: true });
   for (const ent of fs.readdirSync(src, { withFileTypes: true })) {
     if (ent.name === "_author" || ent.name === "node_modules") continue;
@@ -212,8 +352,8 @@ function copyDir(src, dest) {
       continue;
     }
     if (st.isSymbolicLink()) continue;
-    if (st.isDirectory()) copyDir(from, to);
-    else if (st.isFile()) fs.copyFileSync(from, to);
+    if (st.isDirectory()) copyDir(from, to, copyFileSync);
+    else if (st.isFile()) copyFileSync(from, to);
   }
 }
 
