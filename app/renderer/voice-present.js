@@ -18,7 +18,7 @@ function presentVoiceState(s, ui) {
   }
   const hint = spokenHint(s);
   if (s?.state !== "listening" && view.setHint) view.setHint(hint);
-  if (s?.state === "idle" && hint && view.floatText) view.floatText(hint);
+  if (s?.state === "idle" && hint && !s?.suppressPetFloat && view.floatText) view.floatText(hint);
 }
 
 if (typeof module === "object" && module.exports) {

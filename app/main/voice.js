@@ -131,7 +131,10 @@ function settleTranscribed(sessionId, result) {
 
 function failTranscribe(sessionId, message) {
   const finished = finishVoice(sessionId);
-  if (finished.ok) notifyVoice("idle", { note: message });
+  if (finished.ok) {
+    const composeAvailable = Boolean(state.composeWindow && !state.composeWindow.isDestroyed());
+    notifyVoice("idle", { note: message, suppressPetFloat: composeAvailable });
+  }
   return finished;
 }
 

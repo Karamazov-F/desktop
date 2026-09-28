@@ -887,7 +887,25 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
     voice.failTranscribe(again.sessionId, stt);
     const sttIdle = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").pop();
     assert.equal(sttIdle.payload.note, stt);
+    assert.equal(sttIdle.payload.suppressPetFloat, true);
     assert.equal(sttIdle.payload.error, undefined);
+    const sttFloats = [];
+    presentVoiceState(sttIdle.payload, { floatText: (text) => sttFloats.push(text) });
+    assert.deepEqual(sttFloats, []);
+    const idleCount = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").length;
+    assert.equal(voice.failTranscribe(again.sessionId, stt).ok, false);
+    assert.equal(sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").length, idleCount);
+    const withoutCompose = await voice.beginVoice("hotkey");
+    const savedCompose = state.composeWindow;
+    state.composeWindow = null;
+    voice.failTranscribe(withoutCompose.sessionId, stt);
+    const petOnlyIdle = sent.filter((e) => e.name === "pet" && e.channel === "voice-state" && e.payload.state === "idle").pop();
+    assert.equal(petOnlyIdle.payload.suppressPetFloat, false);
+    const petOnlyFloats = [];
+    presentVoiceState(petOnlyIdle.payload, { floatText: (text) => petOnlyFloats.push(text) });
+    assert.deepEqual(petOnlyFloats, [stt]);
+    state.composeWindow = savedCompose;
+    require("../app/main/compose").cancelComposeNoteHold();
     const closedAtStt = composeClosed;
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal(composeClosed, closedAtStt);
@@ -949,6 +967,20 @@ test("local mode stays quiet and a missing key is mentioned once", async () => {
     userData,
   });
   assert.equal(second.fallbackNote, "");
+  const unreadableDir = tmpDir();
+  fs.writeFileSync(path.join(unreadableDir, "settings.json"), JSON.stringify({
+    deepseekEnabled: true,
+    deepseekApiKeyEnc: crypto.sealKey("sk-secret"),
+  }));
+  const unreadableSettings = settings.loadSettings(unreadableDir, brokenCrypto);
+  assert.equal(settings.publicSettings(unreadableSettings).keyUnreadable, true);
+  assert.match(errors.keyHintText(settings.publicSettings(unreadableSettings)), /已保存的 Key 暂时无法读取/);
+  const unreadable = await agent.runAgentTurn({ pack, settings: unreadableSettings, userText: "你好", userData: unreadableDir });
+  assert.equal(unreadable.reason, "unreadable-key");
+  assert.equal(unreadable.fallbackNote, errors.UNREADABLE_KEY_NOTE);
+  assert.doesNotMatch(unreadable.fallbackNote, /还没填|sk-secret/);
+  const unreadableAgain = await agent.runAgentTurn({ pack, settings: unreadableSettings, userText: "再来", userData: unreadableDir });
+  assert.equal(unreadableAgain.fallbackNote, "");
   const gate = errors.createNoteGate(1000);
   const network = errors.NETWORK_REPLY;
   assert.equal(gate(network, 0), network);

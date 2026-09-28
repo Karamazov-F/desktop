@@ -133,7 +133,6 @@ function registerIpc() {
 
   ipcMain.handle("transcribe-audio", async (_e, payload) => {
     const voice = require("./voice");
-    const pet = require("./pet-window");
     try {
       const bytes = payload?.data ? Buffer.from(payload.data) : Buffer.alloc(0);
       if (bytes.length < 200) {
@@ -151,7 +150,6 @@ function registerIpc() {
       console.warn("transcribe failed", err && err.stack ? err.stack : err);
       const message = require("../lib/user-errors").sttFailureMessage(err);
       voice.failTranscribe(payload?.sessionId, message);
-      pet.sendPlay(null, message);
       return { ok: false, error: message, text: "" };
     }
   });

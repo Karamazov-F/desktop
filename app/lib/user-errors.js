@@ -14,6 +14,7 @@ const KEY_FORBIDDEN = "没有权限访问 DeepSeek，请检查账号状态；这
 const RATE_LIMIT = "请求太频繁，稍等一下再试；这次先用本地回复";
 const UNKNOWN_REPLY = "没能从 DeepSeek 得到回复；这次先用本地回复";
 const MISSING_KEY_NOTE = "还没填 DeepSeek Key，这次用本地回复";
+const UNREADABLE_KEY_NOTE = "已保存的 DeepSeek Key 暂时无法读取，请到设置里清除后重新填写；这次先用本地回复";
 const SAME_NOTE_GAP_MS = 60000;
 
 const FIELD_LABELS = {
@@ -132,6 +133,7 @@ function formatKeySaveError(savedKeys) {
 }
 
 let missingKeyNoted = false;
+let unreadableKeyNoted = false;
 
 function replyFallbackNote(reply) {
   if (!reply || !reply.source || reply.source === "deepseek") return "";
@@ -139,6 +141,11 @@ function replyFallbackNote(reply) {
     if (missingKeyNoted) return "";
     missingKeyNoted = true;
     return MISSING_KEY_NOTE;
+  }
+  if (reply.reason === "unreadable-key") {
+    if (unreadableKeyNoted) return "";
+    unreadableKeyNoted = true;
+    return UNREADABLE_KEY_NOTE;
   }
   if (!reply.error) return "";
   return String(reply.error);
@@ -173,6 +180,7 @@ const chatterNoteIfFresh = createNoteGate();
 
 function resetReplyNotices() {
   missingKeyNoted = false;
+  unreadableKeyNoted = false;
   chatterNoteIfFresh.reset();
 }
 
@@ -196,6 +204,7 @@ const api = {
   NETWORK_REPLY,
   RATE_LIMIT,
   MISSING_KEY_NOTE,
+  UNREADABLE_KEY_NOTE,
   SAME_NOTE_GAP_MS,
   fieldLabel,
   userFacingError,

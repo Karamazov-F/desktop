@@ -17,13 +17,13 @@ function createVoiceGate() {
   }
 
   function cancel(sessionId) {
-    if (!matches(sessionId)) return { ok: false, ignored: true, sessionId: session };
+    if (!busy || !matches(sessionId)) return { ok: false, ignored: true, sessionId: session };
     busy = false;
     return { ok: true, cancelled: true, sessionId: session };
   }
 
   function finish(sessionId) {
-    if (!matches(sessionId)) return { ok: false, ignored: true, sessionId: session };
+    if (!busy || !matches(sessionId)) return { ok: false, ignored: true, sessionId: session };
     busy = false;
     return { ok: true, sessionId: session };
   }

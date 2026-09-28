@@ -102,7 +102,9 @@ async function runAgentTurn({
       source: "local",
       displayName,
     };
-    if (settings.deepseekEnabled && !settings.deepseekApiKey) reply.reason = "missing-key";
+    if (settings.deepseekEnabled && !settings.deepseekApiKey) {
+      reply.reason = settings.deepseekApiKeyEnc ? "unreadable-key" : "missing-key";
+    }
     return annotateReply(reply);
   }
 
