@@ -121,6 +121,13 @@ async function runAgentTurn({
   });
   const allowed = allowedToolNames(effective);
   const turn = new AbortController();
+  const ensureActive = () => {
+    if (turn.signal.aborted) {
+      const err = new Error("agent turn cancelled");
+      err.name = "AbortError";
+      throw err;
+    }
+  };
   const onParentAbort = () => turn.abort();
   if (signal) {
     if (signal.aborted) turn.abort();
@@ -157,6 +164,7 @@ async function runAgentTurn({
         thinking: "disabled",
         signal: turn.signal,
       });
+      ensureActive();
 
       if (result.tool_calls && result.tool_calls.length) {
         messages.push({
@@ -165,6 +173,7 @@ async function runAgentTurn({
           tool_calls: result.tool_calls,
         });
         for (const call of result.tool_calls) {
+          ensureActive();
           const name = normalizeToolName(call.function?.name || call.name);
           const args = parseToolArgs(call.function?.arguments || call.arguments);
           const id = call.id || `call_${round}_${name}`;
@@ -198,7 +207,9 @@ async function runAgentTurn({
             } else {
               if (notifyCapture) await notifyCapture(true);
               try {
+                ensureActive();
                 const jpeg = await captureScreen();
+                ensureActive();
                 const desc = await describeScreenshot({
                   apiKey: settings.deepseekApiKey,
                   baseUrl: settings.deepseekBaseUrl,
@@ -207,6 +218,7 @@ async function runAgentTurn({
                   extraHint: userText,
                   signal: turn.signal,
                 });
+                ensureActive();
                 usedVision = true;
                 toolResult = desc || "看不太清";
               } finally {
@@ -226,6 +238,7 @@ async function runAgentTurn({
       lastText = String(result.content || "").trim();
       break;
     }
+    ensureActive();
   } catch (err) {
     console.warn("agent turn failed", err && err.stack ? err.stack : err);
     source = "local-fallback";

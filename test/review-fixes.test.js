@@ -580,6 +580,7 @@ test("hold-to-talk cancel passes the session id", () => {
   for (const name of ["chat.js", "compose.js"]) {
     const src = fs.readFileSync(path.join(root, name), "utf8");
     assert.match(src, /voiceCancel\(res\.sessionId\)/);
+    assert.match(src, /voiceStop\(res\.sessionId\)/);
     assert.doesNotMatch(src, /voiceCancel\?\.\(\)/);
   }
   const pet = fs.readFileSync(path.join(root, "pet.js"), "utf8");
@@ -594,6 +595,7 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
   fs.mkdirSync(userData);
   const electronEntry = require.resolve("electron", { paths: [path.join(__dirname, "..", "app")] });
   const previousElectron = require.cache[electronEntry];
+  const ipcHandlers = new Map();
   require.cache[electronEntry] = {
     id: electronEntry,
     filename: electronEntry,
@@ -611,7 +613,7 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
       },
       dialog: {},
       desktopCapturer: {},
-      ipcMain: { handle() {}, on() {} },
+      ipcMain: { handle(name, handler) { ipcHandlers.set(name, handler); }, on() {} },
       session: { defaultSession: {} },
       globalShortcut: {},
       Tray: function Tray() {},
@@ -655,6 +657,7 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
   state.petWindow = track("pet");
   state.composeWindow = track("compose");
   const originalTurn = agent.runAgentTurn;
+  const originalTranscribe = stt.transcribeBuffer;
   agent.runAgentTurn = async () => ({
     source: "local-fallback",
     text: "嗯",
@@ -715,7 +718,9 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
     state.composerHover = false;
 
     agent.runAgentTurn = async () => ({ source: "local", text: "嗯", displayName: "小鲸" });
-    await voice.handleTranscribedText("在吗");
+    const localStart = await voice.beginVoice("hotkey");
+    const localResult = await voice.handleTranscribedText("在吗", { sessionId: localStart.sessionId });
+    voice.settleTranscribed(localStart.sessionId, localResult);
     const localIdle = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").pop();
     assert.equal(localIdle.payload.note || "", "");
     assert.notEqual(localIdle.payload.note, "来源：本地回复");
@@ -729,7 +734,9 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
       displayName: "小鲸",
       fallbackNote: "还没填 DeepSeek Key，这次用本地回复",
     });
-    await voice.handleTranscribedText("你好");
+    const keyStart = await voice.beginVoice("hotkey");
+    const keyResult = await voice.handleTranscribedText("你好", { sessionId: keyStart.sessionId });
+    voice.settleTranscribed(keyStart.sessionId, keyResult);
     const keyIdle = sent.filter((e) => e.name === "compose" && e.channel === "voice-state" && e.payload.note).pop();
     assert.equal(keyIdle.payload.note, "还没填 DeepSeek Key，这次用本地回复");
     const closedDuringKey = composeClosed;
@@ -893,43 +900,134 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
     petWin.floatText(uncut);
     assert.equal(sent.filter((e) => e.channel === "float-text").pop().payload, uncut);
 
-    const stt = "语音识别出错，请再试一次";
+    const sttError = "语音识别出错，请再试一次";
     state.composeExpanded = false;
     const again = await voice.beginVoice("hotkey");
-    voice.failTranscribe(again.sessionId, stt);
+    voice.failTranscribe(again.sessionId, sttError);
     const sttIdle = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").pop();
-    assert.equal(sttIdle.payload.note, stt);
+    assert.equal(sttIdle.payload.note, sttError);
     assert.equal(sttIdle.payload.suppressPetFloat, true);
     assert.equal(sttIdle.payload.error, undefined);
     const sttFloats = [];
     presentVoiceState(sttIdle.payload, { floatText: (text) => sttFloats.push(text) });
     assert.deepEqual(sttFloats, []);
     const idleCount = sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").length;
-    assert.equal(voice.failTranscribe(again.sessionId, stt).ok, false);
+    assert.equal(voice.failTranscribe(again.sessionId, sttError).ok, false);
     assert.equal(sent.filter((e) => e.channel === "voice-state" && e.payload.state === "idle").length, idleCount);
     const withoutCompose = await voice.beginVoice("hotkey");
     const savedCompose = state.composeWindow;
     state.composeWindow = null;
-    voice.failTranscribe(withoutCompose.sessionId, stt);
+    voice.failTranscribe(withoutCompose.sessionId, sttError);
     const petOnlyIdle = sent.filter((e) => e.name === "pet" && e.channel === "voice-state" && e.payload.state === "idle").pop();
     assert.equal(petOnlyIdle.payload.suppressPetFloat, false);
     const petOnlyFloats = [];
     presentVoiceState(petOnlyIdle.payload, { floatText: (text) => petOnlyFloats.push(text) });
-    assert.deepEqual(petOnlyFloats, [stt]);
+    assert.deepEqual(petOnlyFloats, [sttError]);
     state.composeWindow = savedCompose;
     require("../app/main/compose").cancelComposeNoteHold();
     const closedAtStt = composeClosed;
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal(composeClosed, closedAtStt);
     const sttHints = [];
-    presentVoiceState({ state: "idle", error: stt }, {
+    presentVoiceState({ state: "idle", error: sttError }, {
       setHint(text) {
         sttHints.push(text);
       },
     });
-    assert.deepEqual(sttHints, [stt]);
+    assert.deepEqual(sttHints, [sttError]);
+
+    const oldStt = await voice.beginVoice("hotkey");
+    voice.cancelVoice(oldStt.sessionId);
+    const newStt = await voice.beginVoice("hotkey");
+    const transcriptCount = sent.filter((e) => e.channel === "voice-transcript").length;
+    const staleSttResult = await voice.handleTranscribedText("旧识别", { sessionId: oldStt.sessionId });
+    assert.equal(staleSttResult.stale, true);
+    assert.equal(sent.filter((e) => e.channel === "voice-transcript").length, transcriptCount);
+    assert.equal(voice.isActive(newStt.sessionId), true);
+    const newSttResult = await voice.handleTranscribedText("新识别", { sessionId: newStt.sessionId, autoSend: false });
+    assert.equal(newSttResult.stale, undefined);
+    voice.settleTranscribed(newStt.sessionId, newSttResult);
+
+    let resolveOldTurn;
+    let oldTurnOptions;
+    agent.runAgentTurn = (options) => {
+      oldTurnOptions = options;
+      return new Promise((resolve) => { resolveOldTurn = resolve; });
+    };
+    const oldAi = await voice.beginVoice("hotkey");
+    const chatStore = require("../app/lib/chat-log");
+    const activePack = require("../app/main/state").currentPack();
+    const savedRows = chatStore.loadChat(userData, activePack.id).length;
+    const pendingOldAi = voice.handleTranscribedText("旧问题", { sessionId: oldAi.sessionId });
+    assert.ok(oldTurnOptions);
+    voice.cancelVoice(oldAi.sessionId);
+    const newAi = await voice.beginVoice("hotkey");
+    const beforeLateAction = sent.filter((e) => e.channel === "play-action").length;
+    oldTurnOptions.applyPlay(null, "旧回复");
+    oldTurnOptions.applyMove("left", 10);
+    assert.equal(sent.filter((e) => e.channel === "play-action").length, beforeLateAction);
+    resolveOldTurn({ text: "旧回复", source: "local" });
+    const staleAiResult = await pendingOldAi;
+    assert.equal(staleAiResult.stale, true);
+    assert.equal(chatStore.loadChat(userData, activePack.id).length, savedRows);
+    assert.equal(sent.filter((e) => e.channel === "voice-transcript" && e.payload.reply?.text === "旧回复").length, 0);
+    assert.equal(voice.isActive(newAi.sessionId), true);
+    agent.runAgentTurn = async () => ({ text: "新回复", source: "local" });
+    const newAiResult = await voice.handleTranscribedText("新问题", { sessionId: newAi.sessionId });
+    voice.settleTranscribed(newAi.sessionId, newAiResult);
+    const newRows = chatStore.loadChat(userData, activePack.id);
+    assert.equal(newRows.length, savedRows + 2);
+    assert.ok(JSON.stringify(newRows).includes("新问题"));
+    assert.ok(JSON.stringify(newRows).includes("新回复"));
+    assert.equal(JSON.stringify(newRows).includes("旧问题"), false);
+
+    require("../app/main/ipc").registerIpc();
+    let resolveStt;
+    stt.transcribeBuffer = () => new Promise((resolve) => { resolveStt = resolve; });
+    const ipcOld = await voice.beginVoice("hotkey");
+    const pendingIpc = ipcHandlers.get("transcribe-audio")({}, { data: Buffer.alloc(201), sessionId: ipcOld.sessionId });
+    assert.ok(resolveStt);
+    voice.cancelVoice(ipcOld.sessionId);
+    const ipcNew = await voice.beginVoice("hotkey");
+    const beforeLateTranscript = sent.filter((e) => e.channel === "voice-transcript").length;
+    resolveStt("迟到识别");
+    const staleIpcResult = await pendingIpc;
+    assert.deepEqual(staleIpcResult, { ok: false, error: "stale-session", text: "" });
+    assert.equal(sent.filter((e) => e.channel === "voice-transcript").length, beforeLateTranscript);
+    assert.equal(voice.isActive(ipcNew.sessionId), true);
+    voice.cancelVoice(ipcNew.sessionId);
+
+    const oldStop = await voice.beginVoice("hold");
+    voice.cancelVoice(oldStop.sessionId);
+    const newStop = await voice.beginVoice("hold");
+    const lateStop = await ipcHandlers.get("voice-stop")({}, oldStop.sessionId);
+    assert.equal(lateStop.ignored, true);
+    assert.equal(voice.isActive(newStop.sessionId), true);
+    const currentStop = await ipcHandlers.get("voice-stop")({}, newStop.sessionId);
+    assert.equal(currentStop.ok, true);
+    voice.cancelVoice(newStop.sessionId);
+
+    const noticeEntry = require.resolve("../app/main/capture-notice");
+    const originalNoticeModule = require.cache[noticeEntry];
+    const noticeCalls = [];
+    require.cache[noticeEntry] = { id: noticeEntry, filename: noticeEntry, loaded: true,
+      exports: { setCaptureNotice: async (on) => { noticeCalls.push(on); } } };
+    try {
+      const notifyCapture = require("../app/main/ipc").notifyCapture;
+      const chatOwner = Symbol("chat test");
+      await notifyCapture(true, chatOwner);
+      await notifyCapture(true, "voice:test");
+      await notifyCapture(false, "voice:test");
+      assert.deepEqual(noticeCalls, [true]);
+      await notifyCapture(false, chatOwner);
+      assert.deepEqual(noticeCalls, [true, false]);
+    } finally {
+      if (originalNoticeModule) require.cache[noticeEntry] = originalNoticeModule;
+      else delete require.cache[noticeEntry];
+    }
   } finally {
     agent.runAgentTurn = originalTurn;
+    stt.transcribeBuffer = originalTranscribe;
     if (previousElectron) require.cache[electronEntry] = previousElectron;
     else delete require.cache[electronEntry];
     delete global.document;

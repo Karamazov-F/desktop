@@ -157,8 +157,15 @@ window.PetHoldTalk.bind(micBtn, {
     Promise.resolve(voiceStartPromise).catch(console.error);
   },
   onSend() {
+    const pending = voiceStartPromise;
     voiceStartPromise = null;
-    window.petApi.voiceStop().catch(console.error);
+    Promise.resolve(pending)
+      .then((res) => {
+        if (res && res.ok && res.sessionId !== undefined && res.sessionId !== null && res.sessionId !== "") {
+          return window.petApi.voiceStop(res.sessionId);
+        }
+      })
+      .catch(console.error);
   },
   onTooShort() {
     const pending = voiceStartPromise;

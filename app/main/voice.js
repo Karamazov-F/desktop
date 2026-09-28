@@ -5,6 +5,18 @@ const { createVoiceGate, voiceReleaseTooSoon, MIN_VOICE_MS } = require("../lib/v
 const { state, currentPack, loadSettings, userData } = require("./state");
 
 const gate = createVoiceGate();
+let voiceTurnAbort = null;
+let captureOwner = null;
+
+function isActive(sessionId) {
+  return gate.isActive(sessionId);
+}
+
+function stopCaptureFor(sessionId) {
+  if (captureOwner !== sessionId) return;
+  captureOwner = null;
+  require("./ipc").notifyCapture(false, `voice:${sessionId}`).catch((err) => console.warn("hide capture notice", err));
+}
 
 function sendRecord(payload) {
   if (state.petWindow && !state.petWindow.isDestroyed()) {
@@ -35,8 +47,10 @@ function notifyVoice(next, extra = {}) {
   }
 }
 
-async function handleTranscribedText(text, { autoSend = true } = {}) {
+async function handleTranscribedText(text, { autoSend = true, sessionId = gate.current() } = {}) {
   const pet = require("./pet-window");
+  const stale = () => ({ text: "", sent: false, stale: true, idleNotified: true });
+  if (!isActive(sessionId)) return stale();
   const cleaned = String(text || "").trim();
   if (!cleaned) {
     pet.sendPlay(null, "没听清，再说一次？");
@@ -52,16 +66,33 @@ async function handleTranscribedText(text, { autoSend = true } = {}) {
   if (autoSend) {
     const pack = currentPack();
     if (!pack) return { text: cleaned, sent: false };
+    const sessionSignal = voiceTurnAbort?.signal;
     const res = await agent.runAgentTurn({
       pack,
       settings: loadSettings(),
       userText: cleaned,
       userData: userData(),
-      captureScreen: pet.capturePrimaryJpeg,
-      notifyCapture: (on) => require("./ipc").notifyCapture(on),
-      applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
-      applyMove: (dir, dist) => pet.movePet(dir, dist),
+      signal: sessionSignal,
+      captureScreen: () => {
+        if (!isActive(sessionId)) throw new Error("voice session cancelled");
+        return pet.capturePrimaryJpeg({ signal: sessionSignal });
+      },
+      notifyCapture: (on) => {
+        if (on) {
+          if (!isActive(sessionId)) return;
+          captureOwner = sessionId;
+          return require("./ipc").notifyCapture(true, `voice:${sessionId}`);
+        }
+        stopCaptureFor(sessionId);
+      },
+      applyPlay: (action, line, move) => {
+        if (isActive(sessionId)) pet.sendPlay(action, line, move);
+      },
+      applyMove: (dir, dist) => {
+        if (isActive(sessionId)) pet.movePet(dir, dist);
+      },
     });
+    if (!isActive(sessionId)) return stale();
     chatLog.appendChat(userData(), pack.id, "user", cleaned);
     if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
     if (state.chatWindow && !state.chatWindow.isDestroyed()) {
@@ -80,6 +111,7 @@ async function handleTranscribedText(text, { autoSend = true } = {}) {
 async function beginVoice(source = "hotkey") {
   const started = gate.begin();
   if (!started.ok) return started;
+  voiceTurnAbort = new AbortController();
   state.voiceBusy = true;
   state.voiceSession = started.sessionId;
   state.voiceStartedAt = Date.now();
@@ -94,8 +126,8 @@ async function beginVoice(source = "hotkey") {
   return started;
 }
 
-async function endVoice() {
-  const sessionId = gate.current();
+async function endVoice(sessionId = gate.current()) {
+  if (!isActive(sessionId)) return { ok: false, ignored: true, sessionId: gate.current() };
   if (voiceReleaseTooSoon(state.voiceSource, state.voiceStartedAt)) {
     cancelVoice(sessionId);
     try {
@@ -113,6 +145,9 @@ async function endVoice() {
 function cancelVoice(sessionId) {
   const result = gate.cancel(sessionId);
   if (!result.ok) return result;
+  voiceTurnAbort?.abort();
+  voiceTurnAbort = null;
+  stopCaptureFor(result.sessionId);
   state.voiceBusy = false;
   state.voiceHotkeyArmed = false;
   state.voiceStartedAt = 0;
@@ -141,6 +176,9 @@ function failTranscribe(sessionId, message) {
 function finishVoice(sessionId) {
   const result = gate.finish(sessionId);
   if (!result.ok) return result;
+  voiceTurnAbort?.abort();
+  voiceTurnAbort = null;
+  stopCaptureFor(result.sessionId);
   state.voiceBusy = false;
   state.voiceHotkeyArmed = false;
   state.voiceStartedAt = 0;
@@ -157,6 +195,7 @@ function toggleVoiceHotkey() {
 }
 
 module.exports = {
+  isActive,
   notifyVoice,
   handleTranscribedText,
   beginVoice,

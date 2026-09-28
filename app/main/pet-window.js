@@ -89,7 +89,15 @@ function movePet(direction, distance) {
   sendPlay(walk, null, { direction, distance: distance || 220 });
 }
 
-async function capturePrimaryJpeg() {
+async function capturePrimaryJpeg({ signal } = {}) {
+  const ensureActive = () => {
+    if (signal?.aborted) {
+      const err = new Error("voice session cancelled");
+      err.name = "AbortError";
+      throw err;
+    }
+  };
+  ensureActive();
   const display = screen.getPrimaryDisplay();
   const size = display.size;
   const thumbW = Math.min(1280, size.width);
@@ -99,10 +107,12 @@ async function capturePrimaryJpeg() {
   captureNotice.concealForGrab();
   await new Promise((r) => setTimeout(r, 80));
   try {
+    ensureActive();
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
       thumbnailSize: { width: thumbW, height: thumbH },
     });
+    ensureActive();
     const match =
       sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
     if (!match) throw new Error("no screen source");

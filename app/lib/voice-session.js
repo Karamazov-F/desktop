@@ -38,6 +38,9 @@ function createVoiceGate() {
     isBusy() {
       return busy;
     },
+    isActive(sessionId) {
+      return busy && matches(sessionId);
+    },
   };
 }
 

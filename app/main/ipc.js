@@ -14,10 +14,20 @@ const {
   userData,
 } = require("./state");
 
-async function notifyCapture(on) {
-  const pet = require("./pet-window");
-  if (on) pet.sendPlay(null, "正在查看屏幕，画面将发送到视觉接口");
-  await require("./capture-notice").setCaptureNotice(on);
+const captureOwners = new Set();
+async function notifyCapture(on, owner = "legacy") {
+  if (on) {
+    if (captureOwners.has(owner)) return;
+    const first = captureOwners.size === 0;
+    captureOwners.add(owner);
+    if (first) {
+      require("./pet-window").sendPlay(null, "正在查看屏幕，画面将发送到视觉接口");
+      await require("./capture-notice").setCaptureNotice(true);
+    }
+    return;
+  }
+  if (!captureOwners.delete(owner) || captureOwners.size > 0) return;
+  await require("./capture-notice").setCaptureNotice(false);
 }
 
 function registerIpc() {
@@ -61,6 +71,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("chat", async (e, userText) => {
+    const captureOwner = Symbol("chat capture");
     const pack = currentPack();
     if (!pack) return { text: "还没有角色包。", action: null, displayName: "桌宠" };
     const pet = require("./pet-window");
@@ -83,7 +94,7 @@ function registerIpc() {
         userText,
         userData: userData(),
         captureScreen: pet.capturePrimaryJpeg,
-        notifyCapture,
+        notifyCapture: (on) => notifyCapture(on, captureOwner),
         applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
         applyMove: (dir, dist) => pet.movePet(dir, dist),
       });
@@ -128,7 +139,10 @@ function registerIpc() {
   });
 
   ipcMain.handle("voice-start", async (_e, source) => require("./voice").beginVoice(source || "hotkey"));
-  ipcMain.handle("voice-stop", async () => require("./voice").endVoice());
+  ipcMain.handle("voice-stop", async (_e, sessionId) => {
+    if (sessionId === undefined || sessionId === null || sessionId === "") return { ok: false, ignored: true };
+    return require("./voice").endVoice(sessionId);
+  });
   ipcMain.handle("voice-cancel", async (_e, sessionId) => require("./voice").cancelVoice(sessionId));
 
   ipcMain.handle("transcribe-audio", async (_e, payload) => {
@@ -137,19 +151,24 @@ function registerIpc() {
       const bytes = payload?.data ? Buffer.from(payload.data) : Buffer.alloc(0);
       if (bytes.length < 200) {
         const finished = voice.finishVoice(payload?.sessionId);
-        if (finished.ok) voice.notifyVoice("idle");
+        if (!finished.ok) return { ok: false, error: "stale-session", text: "" };
+        voice.notifyVoice("idle");
         return { ok: false, error: "too-short", text: "" };
       }
       const text = await stt.transcribeBuffer(bytes);
+      if (!voice.isActive(payload?.sessionId)) return { ok: false, error: "stale-session", text: "" };
       const result = await voice.handleTranscribedText(text, {
         autoSend: payload?.autoSend !== false,
+        sessionId: payload?.sessionId,
       });
+      if (result.stale) return { ok: false, error: "stale-session", text: "" };
       voice.settleTranscribed(payload?.sessionId, result);
       return { ok: true, ...result };
     } catch (err) {
       console.warn("transcribe failed", err && err.stack ? err.stack : err);
       const message = require("../lib/user-errors").sttFailureMessage(err);
-      voice.failTranscribe(payload?.sessionId, message);
+      const finished = voice.failTranscribe(payload?.sessionId, message);
+      if (!finished.ok) return { ok: false, error: "stale-session", text: "" };
       return { ok: false, error: message, text: "" };
     }
   });

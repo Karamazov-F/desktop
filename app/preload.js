@@ -30,7 +30,7 @@ contextBridge.exposeInMainWorld("petApi", {
   nudgeBy: (delta) => ipcRenderer.send("pet-nudge-by", delta),
   getWorkArea: () => ipcRenderer.invoke("get-work-area"),
   voiceStart: (source) => ipcRenderer.invoke("voice-start", source || "hotkey"),
-  voiceStop: () => ipcRenderer.invoke("voice-stop"),
+  voiceStop: (sessionId) => ipcRenderer.invoke("voice-stop", sessionId),
   voiceCancel: (sessionId) => ipcRenderer.invoke("voice-cancel", sessionId),
   transcribeAudio: (bytes, mime, autoSend, sessionId) =>
     ipcRenderer.invoke("transcribe-audio", {
