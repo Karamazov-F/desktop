@@ -51,6 +51,8 @@ body {
 #hint {
   display: none;
   min-height: 16px;
+  max-height: 180px;
+  overflow-y: auto;
   margin: 0 12px 4px;
   color: #5c5c64;
   font-size: 12px;
@@ -65,7 +67,7 @@ body.expanded #hint:not(:empty) {
   display: block;
 }
 body.expanded #card {
-  height: auto;
+  height: 100vh;
   min-height: 68px;
 }
 #hint:empty {
@@ -126,8 +128,9 @@ body.expanded #card {
 }
 #btns {
   position: absolute;
-  top: 5px;
+  top: 6px;
   right: 8px;
+  z-index: 2;
 }
 .btn {
   position: relative;

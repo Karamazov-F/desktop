@@ -199,13 +199,25 @@ function registerIpc() {
     else compose.pointerLeftCompose();
   });
 
-  ipcMain.on("compose-expanded", (_e, expanded) => {
+  ipcMain.on("compose-expanded", (e, expanded) => {
+    if (!state.composeWindow || state.composeWindow.isDestroyed()) return;
+    if (e.sender !== state.composeWindow.webContents || e.senderFrame !== e.sender.mainFrame) return;
     const compose = require("./compose");
     const was = state.composeExpanded;
     state.composeExpanded = Boolean(expanded);
+    if (state.composeExpanded) compose.markComposeInteraction();
     if (state.composeExpanded) compose.positionComposeBesidePet();
     if (state.composeExpanded && !was) compose.armDismiss();
     compose.syncOutsideWatch();
+  });
+
+  ipcMain.on("compose-hint-text", (e, text, source) => {
+    if (!state.composeWindow || state.composeWindow.isDestroyed()) return;
+    if (e.sender !== state.composeWindow.webContents || e.senderFrame !== e.sender.mainFrame) return;
+    if (typeof text !== "string") return;
+    state.composeHintText = text.slice(0, 4096);
+    state.composeHintIsNote = source === "note";
+    if (state.composeExpanded) require("./compose").positionComposeBesidePet();
   });
 
   ipcMain.on("compose-hold", (_e, on) => {

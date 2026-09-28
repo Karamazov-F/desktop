@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld("petApi", {
   setComposeHover: (hovered) => ipcRenderer.send("compose-hover", Boolean(hovered)),
   setPetComposeHover: (hovered) => ipcRenderer.send("pet-compose-hover", Boolean(hovered)),
   setComposeExpanded: (expanded) => ipcRenderer.send("compose-expanded", Boolean(expanded)),
+  setComposeHintText: (text, source) => ipcRenderer.send("compose-hint-text", String(text || "").slice(0, 4096), source === "note" ? "note" : "other"),
   floatText: (text) => ipcRenderer.send("float-text", String(text || "")),
   setComposeHold: (on) => ipcRenderer.send("compose-hold", Boolean(on)),
   onComposeLayout: (cb) => ipcRenderer.on("compose-layout", (_e, layout) => cb(layout || {})),

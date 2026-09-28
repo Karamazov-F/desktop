@@ -725,6 +725,33 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
     assert.equal(composeClosed, closedDuringKey);
     compose.cancelComposeNoteHold();
 
+    state.composeExpanded = true;
+    const closedBeforeDraft = composeClosed;
+    compose.holdComposeForNote(note);
+    compose.releaseComposeNoteHold();
+    assert.equal(composeClosed, closedBeforeDraft);
+    assert.equal(state.composeExpanded, true);
+    assert.equal(state.composeNoteText, "");
+    assert.deepEqual(sent.filter((e) => e.name === "compose" && e.channel === "compose-note").pop().payload, { text: "", expiredNote: note });
+
+    state.composeExpanded = false;
+    compose.holdComposeForNote(note);
+    compose.markComposeInteraction();
+    state.composeHintText = "新的聊天错误";
+    state.composeHintIsNote = false;
+    compose.releaseComposeNoteHold();
+    assert.equal(state.composeHintText, "新的聊天错误");
+    assert.equal(state.composeNoteText, "");
+    assert.deepEqual(sent.filter((e) => e.name === "compose" && e.channel === "compose-note").pop().payload, { text: "", expiredNote: note });
+
+    state.composeExpanded = false;
+    compose.holdComposeForNote(note);
+    compose.markComposeInteraction();
+    compose.releaseComposeNoteHold();
+    assert.equal(composeClosed, closedBeforeDraft);
+    assert.equal(state.composeExpanded, true);
+    state.composeExpanded = false;
+
     const element = () => ({
       classList: { toggle() {}, add() {}, remove() {} },
       addEventListener() {},
@@ -1008,6 +1035,9 @@ test("chat and the compose bar show a fallback row only when there is a reason",
       keydown(event) {
         return handlers.keydown && handlers.keydown(event);
       },
+      emit(type) {
+        return handlers[type] && handlers[type]();
+      },
       style: { setProperty() {} },
       textContent: "",
       value: "",
@@ -1123,6 +1153,8 @@ test("chat and the compose bar show a fallback row only when there is a reason",
   const composeSandbox = {
     console,
     Promise,
+    hintSignals: [],
+    expandedSignals: [],
     document: {
       getElementById(id) {
         return composeIds[id] || element();
@@ -1139,7 +1171,12 @@ test("chat and the compose bar show a fallback row only when there is a reason",
           composeSandbox.note = cb;
         },
         setComposeHover() {},
-        setComposeExpanded() {},
+        setComposeExpanded(value) {
+          composeSandbox.expandedSignals.push(value);
+        },
+        setComposeHintText(value) {
+          composeSandbox.hintSignals.push(value);
+        },
         setComposeHold() {},
         chat: async () => composeSandbox.nextReply,
         floatText() {},
@@ -1172,7 +1209,21 @@ test("chat and the compose bar show a fallback row only when there is a reason",
   composeSandbox.document = composeSandbox.document;
   composeSandbox.note({ text: errors.BALANCE_REPLY });
   assert.equal(hintEl.textContent, errors.BALANCE_REPLY);
-  assert.equal(inputEl.value, "");
+  assert.equal(composeSandbox.hintSignals.at(-1), errors.BALANCE_REPLY);
+  assert.equal(composeSandbox.expandedSignals.length, 0);
+  inputEl.value = "明天见";
+  inputEl.emit("input");
+  assert.deepEqual(composeSandbox.expandedSignals, [true]);
+  composeSandbox.note({ text: "", expiredNote: errors.BALANCE_REPLY });
+  assert.equal(composeSandbox.hintSignals.at(-1), "");
+  assert.equal(inputEl.value, "明天见");
+  composeSandbox.note({ text: errors.BALANCE_REPLY });
+  inputEl.value = "新消息";
+  composeSandbox.nextReply = { text: "嗯", source: "local", fallbackNote: "新的聊天错误" };
+  await sendEl.click();
+  composeSandbox.note({ text: "", expiredNote: errors.BALANCE_REPLY });
+  assert.equal(hintEl.textContent, "新的聊天错误");
+  assert.equal(composeSandbox.hintSignals.at(-1), "新的聊天错误");
 });
 
 test("model and microphone errors shown to the user are Chinese", () => {

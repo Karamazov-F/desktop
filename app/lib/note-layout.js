@@ -8,6 +8,7 @@ const PET_LINE_PX = 20;
 const PET_INSET_PX = 24;
 const COMPOSE_FONT_PX = 12;
 const COMPOSE_LINE_PX = 18;
+const MAX_COMPOSE_NOTE_LINES = 10;
 const HOLD_FLOOR_MS = 6000;
 
 function charsOf(text) {
@@ -49,13 +50,13 @@ function composeNoteSize(text, width) {
   const boxWidth = Math.max(COMPOSE_FONT_PX, Math.floor(Number(width) || 0));
   const inner = Math.max(COMPOSE_FONT_PX, boxWidth - (14 * 2 + 12 * 2));
   const wrapped = wrapText(label, inner, COMPOSE_FONT_PX);
-  const hintH = wrapped.lines.length * COMPOSE_LINE_PX + 8;
+  const hintH = Math.min(wrapped.lines.length, MAX_COMPOSE_NOTE_LINES) * COMPOSE_LINE_PX + 8;
   return {
     width: boxWidth,
     height: 68 + hintH + 8,
     lines: wrapped.lines,
     text: label,
-    fits: wrapped.lines.join("") === label,
+    fits: wrapped.lines.join("") === label && wrapped.lines.length <= MAX_COMPOSE_NOTE_LINES,
   };
 }
 

@@ -7,8 +7,9 @@ const COMPOSE_PILL_SIZE = { width: 120, height: 76 };
 const COMPOSE_HOVER_CLOSE_MS = 400;
 
 function composeBox() {
-  if (state.composeExpanded && state.composeNoteText) {
-    return require("../lib/note-layout").composeNoteSize(state.composeNoteText, COMPOSE_SIZE.width);
+  const hint = state.composeHintText || state.composeNoteText;
+  if (state.composeExpanded && hint) {
+    return require("../lib/note-layout").composeNoteSize(hint, COMPOSE_SIZE.width);
   }
   const size = state.composeExpanded ? COMPOSE_SIZE : COMPOSE_PILL_SIZE;
   return { width: size.width, height: size.height };
@@ -74,6 +75,9 @@ function wireComposeWindow(win) {
     clearTimeout(state.composeNoteHoldTimer);
     state.composeNoteHoldTimer = null;
     state.composeNoteText = "";
+    state.composeHintText = "";
+    state.composeHintIsNote = false;
+    state.composeNoteKeepOpen = false;
     state.composeNoteUntilLeave = false;
     state.composeWindow = null;
     state.composerHover = false;
@@ -142,16 +146,26 @@ function cancelComposeNoteHold() {
   state.composeNoteHoldTimer = null;
   state.composeNoteUntilLeave = false;
   state.composeNoteText = "";
+  if (state.composeHintIsNote) state.composeHintText = "";
+  state.composeHintIsNote = false;
+  state.composeNoteKeepOpen = false;
+}
+
+function markComposeInteraction() {
+  if (state.composeNoteText) state.composeNoteKeepOpen = true;
 }
 
 function holdComposeForNote(note) {
   const text = String(note || "");
   if (!text) return;
+  if (!state.composeNoteText) state.composeNoteKeepOpen = state.composeExpanded;
   clearTimeout(state.composeHoverCloseTimer);
   clearTimeout(state.composeNoteHoldTimer);
   state.composeVoicePin = true;
   state.composeNoteUntilLeave = false;
   state.composeNoteText = text;
+  state.composeHintText = text;
+  state.composeHintIsNote = true;
   state.composeExpanded = true;
   if (state.composeWindow && !state.composeWindow.isDestroyed()) {
     positionComposeBesidePet();
@@ -163,9 +177,28 @@ function holdComposeForNote(note) {
   state.composeNoteHoldTimer = setTimeout(() => releaseComposeNoteHold(), wait);
 }
 
+function clearComposeNoteKeepingInput() {
+  const expiredNote = state.composeNoteText;
+  state.composeNoteKeepOpen = false;
+  state.composeNoteUntilLeave = false;
+  state.composeNoteText = "";
+  if (state.composeHintIsNote) state.composeHintText = "";
+  state.composeHintIsNote = false;
+  if (state.composeWindow && !state.composeWindow.isDestroyed()) {
+    state.composeWindow.webContents.send("compose-note", { text: "", expiredNote });
+    positionComposeBesidePet();
+    syncOutsideWatch();
+  }
+}
+
 function releaseComposeNoteHold() {
+  clearTimeout(state.composeNoteHoldTimer);
   state.composeNoteHoldTimer = null;
   state.composeVoicePin = false;
+  if (state.composeNoteKeepOpen) {
+    clearComposeNoteKeepingInput();
+    return;
+  }
   if (state.composerHover || state.petComposeHover || cursorInsideWindow(state.composeWindow)) {
     state.composeNoteUntilLeave = true;
     return;
@@ -175,6 +208,10 @@ function releaseComposeNoteHold() {
 
 function pointerLeftCompose() {
   if (state.composeNoteUntilLeave) {
+    if (state.composeNoteKeepOpen) {
+      clearComposeNoteKeepingInput();
+      return;
+    }
     state.composeNoteUntilLeave = false;
     closeComposeWindow();
     return;
@@ -229,6 +266,7 @@ function prewarmComposeWindow() {
 }
 
 function requestComposeExpand() {
+  markComposeInteraction();
   if (!state.composeExpanded) armDismiss();
   state.composeExpanded = true;
   if (state.composeWindow && !state.composeWindow.isDestroyed()) {
@@ -311,6 +349,7 @@ module.exports = {
   scheduleComposeHoverClose,
   holdComposeForNote,
   cancelComposeNoteHold,
+  markComposeInteraction,
   releaseComposeNoteHold,
   pointerLeftCompose,
   prewarmComposeWindow,

@@ -40,8 +40,12 @@ function bindMic(btn) {
   });
 }
 
-function setHint(text) {
-  hintEl.textContent = text || "";
+let hintSource = "other";
+function setHint(text, source = "other") {
+  const value = String(text || "");
+  hintSource = source;
+  hintEl.textContent = value;
+  window.petApi.setComposeHintText?.(value, source);
 }
 
 function expand() {
@@ -88,7 +92,11 @@ openComposeBtn.addEventListener("click", () => {
   setTimeout(() => inputEl.focus(), 0);
 });
 sendBtn.addEventListener("click", () => send().catch(console.error));
-inputEl.addEventListener("input", syncSendReady);
+inputEl.addEventListener("focus", () => window.petApi.setComposeExpanded?.(true));
+inputEl.addEventListener("input", () => {
+  syncSendReady();
+  window.petApi.setComposeExpanded?.(true);
+});
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") send().catch(console.error);
   if (e.key === "Escape") window.petApi.windowClose?.();
@@ -105,7 +113,8 @@ window.petApi.onVoiceState?.((s) => {
 
 window.petApi.onComposeHint?.((text) => setHint(text));
 window.petApi.onComposeNote?.((payload) => {
-  expand();
-  setHint(payload?.text || "");
+  document.body.classList.add("expanded");
+  if (payload?.text) setHint(payload.text, "note");
+  else if (hintSource === "note" && hintEl.textContent === payload?.expiredNote) setHint("");
 });
 
