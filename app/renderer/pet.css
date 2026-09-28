@@ -145,7 +145,7 @@ body::-webkit-scrollbar,
   color: #111;
   font: 700 16px/1.15 var(--pet-ui-font);
   white-space: normal;
-  word-break: break-word;
+  word-break: normal;
   overflow-wrap: anywhere;
   text-align: center;
   letter-spacing: 0.02em;
@@ -153,6 +153,10 @@ body::-webkit-scrollbar,
     0 -2px 0 #fff, 0 2px 0 #fff, -2px 0 0 #fff, 2px 0 0 #fff,
     -2px -2px 0 #fff, 2px -2px 0 #fff, -2px 2px 0 #fff, 2px 2px 0 #fff,
     0 -1px 0 #fff, 0 1px 0 #fff, -1px 0 0 #fff, 1px 0 0 #fff;
+}
+@media (max-width: 120px) {
+  .pet-floater { left: 4px; right: 4px; max-width: calc(100% - 8px); }
+  .pet-floater-line { font-size: 14px; }
 }
 @keyframes pet-floater-in {
   from { opacity: 0; }

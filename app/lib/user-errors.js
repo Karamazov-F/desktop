@@ -191,7 +191,7 @@ function displaySaveError(err) {
   return text.trim() || "保存失败，请再试一次";
 }
 
-const api = {
+const userErrorsApi = {
   TOO_EARLY,
   VOICE_PROCESS_FAILED,
   LOCAL_REPLY,
@@ -222,7 +222,7 @@ const api = {
 };
 
 if (typeof module === "object" && module.exports) {
-  module.exports = api;
+  module.exports = userErrorsApi;
 } else {
-  globalThis.PetUserErrors = api;
+  globalThis.PetUserErrors = userErrorsApi;
 }

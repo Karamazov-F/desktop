@@ -60,7 +60,7 @@ function composeNoteSize(text, width) {
   };
 }
 
-const api = {
+const petNoteLayoutApi = {
   PET_FONT_PX,
   PET_INSET_PX,
   HOLD_FLOOR_MS,
@@ -71,7 +71,7 @@ const api = {
 };
 
 if (typeof module === "object" && module.exports) {
-  module.exports = api;
+  module.exports = petNoteLayoutApi;
 } else {
-  globalThis.PetNoteLayout = api;
+  globalThis.PetNoteLayout = petNoteLayoutApi;
 }

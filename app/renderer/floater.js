@@ -24,12 +24,10 @@
       const plan = window.PetNoteLayout.fitPetNote(label, size.width, size.height);
       node = document.createElement("div");
       node.className = "pet-floater";
-      for (const line of plan.lines) {
-        const span = document.createElement("span");
-        span.className = "pet-floater-line";
-        span.textContent = line;
-        node.appendChild(span);
-      }
+      const span = document.createElement("span");
+      span.className = "pet-floater-line";
+      span.textContent = label;
+      node.appendChild(span);
       host.appendChild(node);
       const finish = () => {
         if (mine !== token || !node) return;

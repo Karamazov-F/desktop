@@ -289,6 +289,18 @@ test("renderer pages keep a self style CSP and floaters are not injected", () =>
   assert.match(css, /\.pet-floater\b/);
 });
 
+test("shared browser libraries load together without global declaration collisions", () => {
+  const vm = require("vm");
+  const context = vm.createContext({});
+  context.window = context;
+  for (const name of ["user-errors.js", "note-layout.js", "hotkeys.js"]) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "app", "lib", name), "utf8"), context, { filename: name });
+  }
+  assert.equal(typeof context.PetUserErrors.keyHintText, "function");
+  assert.equal(typeof context.PetNoteLayout.fitPetNote, "function");
+  assert.equal(typeof context.PetHotkeys.normalize, "function");
+});
+
 test("idle chatter never receives a screen capture", () => {
   const extras = chatter.chatterTurnExtras();
   assert.equal(extras.captureScreen, null);
@@ -1040,8 +1052,9 @@ test("a fallback note wraps inside the narrowest pet window and stays up", () =>
     const node = host.children[0];
     const lines = node.children.map((child) => child.textContent);
     const plan = layout.fitPetNote(text, 96, 352);
-    assert.deepEqual(lines, plan.lines);
+    assert.deepEqual(lines, [text]);
     assert.equal(lines.join(""), text);
+    assert.equal(plan.lines.join(""), text);
     assert.equal(plan.fits, true);
     assert.equal(delays[0], plan.holdMs);
     assert.ok(delays[0] > 2000);
