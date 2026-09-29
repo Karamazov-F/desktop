@@ -72,6 +72,7 @@ async function send() {
   sendBtn.disabled = true;
   try {
     const res = await window.petApi.chat(text);
+    if (res?.stale) return;
     if (res && res.fallbackNote) setHint(res.fallbackNote);
     else if (res) setHint("");
   } catch (err) {

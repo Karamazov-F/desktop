@@ -120,6 +120,7 @@ async function send(textOverride) {
   try {
     const res = await window.petApi.chat(text);
     think.remove();
+    if (res?.stale) return;
     const name = res?.displayName || "桌宠";
     addRow("bot", `${name}：${res?.text || "…"}`);
     addFallbackRow(res);

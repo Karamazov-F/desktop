@@ -126,10 +126,61 @@ $("clearApiKey").addEventListener("click", async () => {
   $("status").textContent = "已清除 API Key。";
 });
 
-$("clearAll").addEventListener("click", async () => {
-  if (!window.confirm("清除全部聊天记录和记忆？此操作不能撤销。")) return;
-  await window.petApi.clearAllLocal();
-  $("status").textContent = "已清除全部聊天记录和记忆。";
+const forgetModal = $("forget-modal");
+const forgetPhrase = $("forget-phrase");
+const forgetConfirm = $("forget-confirm");
+let forgetPending = false;
+let forgetPackId = null;
+let forgetOpenId = 0;
+
+function closeForget() {
+  forgetOpenId += 1;
+  forgetPackId = null;
+  forgetModal.hidden = true;
+  forgetPhrase.value = "";
+  forgetConfirm.disabled = true;
+  $("forget-status").textContent = "";
+}
+
+$("clearMem").addEventListener("click", async () => {
+  const openId = ++forgetOpenId;
+  try {
+    const pack = await window.petApi.getCurrentPack();
+    if (openId !== forgetOpenId) return;
+    if (!pack?.id) throw new Error("当前没有可清空的角色。");
+    forgetPackId = pack.id;
+    $("forget-pack").textContent = `当前角色：${pack.name || pack.id}（ID：${pack.id}）`;
+    $("forget-status").textContent = "";
+    forgetPhrase.value = "";
+    forgetConfirm.disabled = true;
+    forgetModal.hidden = false;
+    forgetPhrase.focus();
+  } catch (err) {
+    $("status").textContent = String(err?.message || err);
+  }
+});
+$("forget-cancel").addEventListener("click", closeForget);
+forgetPhrase.addEventListener("input", () => {
+  forgetConfirm.disabled = forgetPhrase.value !== "goodbye";
+});
+$("forget-card").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (forgetPending || !forgetPackId || forgetPhrase.value !== "goodbye") return;
+  forgetPending = true;
+  forgetConfirm.disabled = true;
+  try {
+    const result = await window.petApi.clearMemory(forgetPackId, forgetPhrase.value);
+    if (!result?.ok) throw new Error(result?.error || "清空失败。");
+    closeForget();
+    $("status").textContent = "当前角色的记忆和聊天记录已清空。";
+  } catch (err) {
+    const message = String(err?.message || err);
+    $("status").textContent = message;
+    $("forget-status").textContent = message;
+    forgetConfirm.disabled = false;
+  } finally {
+    forgetPending = false;
+  }
 });
 
 $("importDpet").addEventListener("click", () => window.petApi.importPack());

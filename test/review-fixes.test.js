@@ -1025,6 +1025,58 @@ test("a voice reply with chat closed still shows the fallback note", async () =>
       if (originalNoticeModule) require.cache[noticeEntry] = originalNoticeModule;
       else delete require.cache[noticeEntry];
     }
+
+    const otherPackId = "other-pack";
+    const memoryStore = require("../app/lib/memory");
+    chatStore.appendChat(userData, activePack.id, "user", "只清当前角色");
+    chatStore.appendChat(userData, otherPackId, "user", "其他角色保留");
+    memoryStore.rememberFact(userData, activePack.id, "当前记忆");
+    memoryStore.rememberFact(userData, otherPackId, "其他记忆");
+    agent.pushHistory(activePack.id, "user", "当前上下文");
+    agent.pushHistory(otherPackId, "user", "其他上下文");
+    const clearMemory = ipcHandlers.get("clear-memory");
+    assert.deepEqual(clearMemory({}, { packId: activePack.id, phrase: "wrong" }), { ok: false, error: "请输入 goodbye 后再确认。" });
+    assert.ok(chatStore.loadChat(userData, activePack.id).length > 0);
+    assert.deepEqual(clearMemory({}, { packId: activePack.id, phrase: "goodbye" }), { ok: true, memoryCleared: true, chatCleared: true });
+    assert.deepEqual(chatStore.loadChat(userData, activePack.id), []);
+    assert.deepEqual(memoryStore.loadMemory(userData, activePack.id).facts, []);
+    assert.equal(agent.getHistory(activePack.id).length, 0);
+    assert.equal(chatStore.loadChat(userData, otherPackId)[0].text, "其他角色保留");
+    assert.equal(memoryStore.loadMemory(userData, otherPackId).facts[0], "其他记忆");
+    assert.equal(agent.getHistory(otherPackId)[0].content, "其他上下文");
+
+    require.cache[electronEntry].exports.BrowserWindow.fromWebContents = () => null;
+    let resolveText;
+    agent.runAgentTurn = () => new Promise((resolve) => { resolveText = resolve; });
+    const pendingText = ipcHandlers.get("chat")({ sender: {} }, "待清空文字");
+    assert.ok(resolveText);
+    assert.deepEqual(clearMemory({}, { packId: activePack.id, phrase: "goodbye" }), { ok: true, memoryCleared: true, chatCleared: true });
+    resolveText({ text: "迟到文字回复", source: "deepseek" });
+    assert.deepEqual(await pendingText, { text: "", stale: true });
+    assert.deepEqual(chatStore.loadChat(userData, activePack.id), []);
+
+    let resolveVoice;
+    agent.runAgentTurn = () => new Promise((resolve) => { resolveVoice = resolve; });
+    const pendingVoiceSession = await voice.beginVoice("hotkey");
+    const pendingVoice = voice.handleTranscribedText("待清空语音", { sessionId: pendingVoiceSession.sessionId });
+    assert.ok(resolveVoice);
+    const repliesBeforeClear = sent.filter((event) => event.channel === "voice-transcript" && event.payload.reply).length;
+    assert.deepEqual(clearMemory({}, { packId: activePack.id, phrase: "goodbye" }), { ok: true, memoryCleared: true, chatCleared: true });
+    resolveVoice({ text: "迟到语音回复", source: "deepseek" });
+    assert.equal((await pendingVoice).stale, true);
+    assert.deepEqual(chatStore.loadChat(userData, activePack.id), []);
+    assert.equal(sent.filter((event) => event.channel === "voice-transcript" && event.payload.reply).length, repliesBeforeClear);
+    assert.equal(voice.isActive(pendingVoiceSession.sessionId), false);
+
+    let resolveChatter;
+    agent.runAgentTurn = () => new Promise((resolve) => { resolveChatter = resolve; });
+    const pendingChatter = windows.runChatter();
+    assert.ok(resolveChatter);
+    assert.deepEqual(clearMemory({}, { packId: activePack.id, phrase: "goodbye" }), { ok: true, memoryCleared: true, chatCleared: true });
+    resolveChatter({ text: "迟到碎碎念", source: "deepseek" });
+    await pendingChatter;
+    assert.deepEqual(chatStore.loadChat(userData, activePack.id), []);
+    assert.equal(sent.some((event) => event.channel === "float-text" && event.payload === "迟到碎碎念"), false);
   } finally {
     agent.runAgentTurn = originalTurn;
     stt.transcribeBuffer = originalTranscribe;

@@ -105,12 +105,25 @@
 
       <div class="actions">
         <button type="button" class="primary" id="save">保存</button>
-        <button type="button" id="clearAll">清除全部聊天记录和记忆</button>
+        <button type="button" id="clearMem">清空当前角色的记忆和聊天记录</button>
         <button type="button" id="importDpet">导入 .dpet</button>
         <button type="button" id="importFolder">导入文件夹</button>
       </div>
       <p id="status" class="status"></p>
     </main>
+    <div id="forget-modal" class="modal-back" hidden>
+      <form id="forget-card" class="modal-card">
+        <h2>清空当前角色</h2>
+        <p id="forget-pack"></p>
+        <p>会删掉当前角色的本地记忆和全部聊天记录，并清掉正在使用的对话上下文。输入 goodbye 后才能确认。</p>
+        <input id="forget-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="goodbye" />
+        <p id="forget-status" class="status" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" id="forget-cancel">取消</button>
+          <button type="submit" class="primary" id="forget-confirm" disabled>确认清空</button>
+        </div>
+      </form>
+    </div>
     <script src="../lib/user-errors.js"></script>
     <script src="../lib/hotkeys.js"></script>
     <script src="./chrome.js"></script>

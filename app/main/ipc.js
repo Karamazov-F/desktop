@@ -74,6 +74,7 @@ function registerIpc() {
     const captureOwner = Symbol("chat capture");
     const pack = currentPack();
     if (!pack) return { text: "还没有角色包。", action: null, displayName: "桌宠" };
+    const version = agent.sessionVersion(pack.id);
     const pet = require("./pet-window");
     chatLog.appendChat(userData(), pack.id, "user", userText);
     const from = BrowserWindow.fromWebContents(e.sender);
@@ -95,9 +96,16 @@ function registerIpc() {
         userData: userData(),
         captureScreen: pet.capturePrimaryJpeg,
         notifyCapture: (on) => notifyCapture(on, captureOwner),
-        applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
-        applyMove: (dir, dist) => pet.movePet(dir, dist),
+        applyPlay: (action, line, move) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.sendPlay(action, line, move);
+        },
+        applyMove: (dir, dist) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.movePet(dir, dist);
+        },
       });
+      if (!agent.isSessionCurrent(pack.id, version) || res?.stale) {
+        return { text: "", stale: true };
+      }
       if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
       if (state.chatWindow && !state.chatWindow.isDestroyed() && from !== state.chatWindow) {
         state.chatWindow.webContents.send("chat-turn", { user: userText, reply: res });
@@ -272,15 +280,35 @@ function registerIpc() {
     return pack ? chatLog.loadChat(userData(), pack.id) : [];
   });
 
-  ipcMain.handle("clear-all-local", () => {
-    memory.clearAllMemory(userData());
-    chatLog.clearAllChats(userData());
-    agent.clearSessions();
-    require("./windows").clearLastImportDir();
+  ipcMain.handle("get-current-pack", () => {
+    const pack = currentPack();
+    return pack ? { id: pack.id, name: pack.persona?.displayName || pack.name || pack.id } : null;
+  });
+
+  ipcMain.handle("clear-memory", (_e, request) => {
+    if (request?.phrase !== "goodbye") return { ok: false, error: "请输入 goodbye 后再确认。" };
+    const pack = currentPack();
+    if (!pack) return { ok: false, error: "当前没有可清空的角色。" };
+    if (request.packId !== pack.id) {
+      return { ok: false, error: "角色已切换，请重新打开清空确认框。" };
+    }
+    agent.clearSession(pack.id);
+    try {
+      memory.clearMemory(userData(), pack.id);
+    } catch (err) {
+      return { ok: false, memoryCleared: null, chatCleared: false,
+        error: "记忆清空状态未确认，聊天记录未清空。请先备份并检查本机数据。" };
+    }
+    try {
+      chatLog.clearChat(userData(), pack.id);
+    } catch (err) {
+      return { ok: false, partial: true, memoryCleared: true, chatCleared: false,
+        error: "当前角色的记忆已清空，但聊天记录未清空。请先备份并检查本机数据。" };
+    }
     if (state.chatWindow && !state.chatWindow.isDestroyed()) {
       state.chatWindow.webContents.send("chat-cleared");
     }
-    return { ok: true };
+    return { ok: true, memoryCleared: true, chatCleared: true };
   });
 
   ipcMain.handle("import-pack", async () => {

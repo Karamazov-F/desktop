@@ -66,6 +66,8 @@ async function handleTranscribedText(text, { autoSend = true, sessionId = gate.c
   if (autoSend) {
     const pack = currentPack();
     if (!pack) return { text: cleaned, sent: false };
+    const version = agent.sessionVersion(pack.id);
+    const stillCurrent = () => isActive(sessionId) && agent.isSessionCurrent(pack.id, version);
     const sessionSignal = voiceTurnAbort?.signal;
     const res = await agent.runAgentTurn({
       pack,
@@ -74,25 +76,28 @@ async function handleTranscribedText(text, { autoSend = true, sessionId = gate.c
       userData: userData(),
       signal: sessionSignal,
       captureScreen: () => {
-        if (!isActive(sessionId)) throw new Error("voice session cancelled");
+        if (!stillCurrent()) throw new Error("voice session cancelled");
         return pet.capturePrimaryJpeg({ signal: sessionSignal });
       },
       notifyCapture: (on) => {
         if (on) {
-          if (!isActive(sessionId)) return;
+          if (!stillCurrent()) return;
           captureOwner = sessionId;
           return require("./ipc").notifyCapture(true, `voice:${sessionId}`);
         }
         stopCaptureFor(sessionId);
       },
       applyPlay: (action, line, move) => {
-        if (isActive(sessionId)) pet.sendPlay(action, line, move);
+        if (stillCurrent()) pet.sendPlay(action, line, move);
       },
       applyMove: (dir, dist) => {
-        if (isActive(sessionId)) pet.movePet(dir, dist);
+        if (stillCurrent()) pet.movePet(dir, dist);
       },
     });
-    if (!isActive(sessionId)) return stale();
+    if (!stillCurrent() || res?.stale) {
+      cancelVoice(sessionId);
+      return stale();
+    }
     chatLog.appendChat(userData(), pack.id, "user", cleaned);
     if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
     if (state.chatWindow && !state.chatWindow.isDestroyed()) {

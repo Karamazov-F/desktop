@@ -92,3 +92,35 @@ test("saveSettings drops unknown keys and rejects an unsafe pack id", () => {
     /模型/
   );
 });
+
+test("ordinary settings saves preserve older fields without exposing or clearing the encrypted key", () => {
+  const dir = tmpDir();
+  const enc = crypto.sealKey("sk-kept-secret");
+  fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({
+    deepseekApiKeyEnc: enc,
+    replyChars: 240,
+    personaByPack: { "xiao-jing": { displayName: "旧名字" } },
+  }));
+  settings.saveSettings(dir, { memoryEnabled: true, injected: "discard" }, crypto);
+  const disk = JSON.parse(fs.readFileSync(path.join(dir, "settings.json"), "utf8"));
+  assert.equal(disk.replyChars, 240);
+  assert.deepEqual(disk.personaByPack, { "xiao-jing": { displayName: "旧名字" } });
+  assert.equal(disk.deepseekApiKeyEnc, enc);
+  assert.equal(disk.deepseekApiKey, undefined);
+  assert.equal(disk.injected, undefined);
+  const cleared = settings.saveSettings(dir, { deepseekApiKey: null }, crypto);
+  const afterClear = JSON.parse(fs.readFileSync(path.join(dir, "settings.json"), "utf8"));
+  assert.equal(afterClear.deepseekApiKeyEnc, undefined);
+  assert.equal(afterClear.replyChars, 240);
+  assert.equal(cleared.deepseekApiKey, "");
+});
+
+test("malformed existing settings cannot be silently replaced by a normal save", (t) => {
+  const dir = tmpDir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "settings.json");
+  const bad = "{broken json";
+  fs.writeFileSync(file, bad);
+  assert.throws(() => settings.saveSettings(dir, { memoryEnabled: true }, crypto), SyntaxError);
+  assert.equal(fs.readFileSync(file, "utf8"), bad);
+});

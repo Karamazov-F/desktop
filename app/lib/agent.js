@@ -14,6 +14,7 @@ const {
 } = require("./tools");
 
 const sessions = new Map();
+const sessionVersions = new Map();
 const MAX_ROUNDS = 5;
 const MAX_TURN_MS = 60000;
 
@@ -72,6 +73,20 @@ function clearSessions() {
   sessions.clear();
 }
 
+function clearSession(packId) {
+  const key = sessionKey(packId);
+  sessions.delete(key);
+  sessionVersions.set(key, sessionVersion(packId) + 1);
+}
+
+function sessionVersion(packId) {
+  return sessionVersions.get(sessionKey(packId)) || 0;
+}
+
+function isSessionCurrent(packId, version) {
+  return sessionVersion(packId) === version;
+}
+
 function visionIsOn(settings, allowVision = true) {
   return Boolean(settings?.visionEnabled && allowVision);
 }
@@ -88,6 +103,7 @@ async function runAgentTurn({
   notifyCapture,
   signal,
 }) {
+  const version = sessionVersion(pack.id);
   const displayName = pack.persona?.displayName || pack.name || "桌宠";
   const local = localFallback(pack, userText);
 
@@ -122,7 +138,7 @@ async function runAgentTurn({
   const allowed = allowedToolNames(effective);
   const turn = new AbortController();
   const ensureActive = () => {
-    if (turn.signal.aborted) {
+    if (turn.signal.aborted || !isSessionCurrent(pack.id, version)) {
       const err = new Error("agent turn cancelled");
       err.name = "AbortError";
       throw err;
@@ -150,7 +166,8 @@ async function runAgentTurn({
 
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      if (turn.signal.aborted || Date.now() - started > MAX_TURN_MS) {
+      ensureActive();
+      if (Date.now() - started > MAX_TURN_MS) {
         throw new Error("思考时间过长");
       }
       const result = await chatCompletionsRetry({
@@ -240,6 +257,7 @@ async function runAgentTurn({
     }
     ensureActive();
   } catch (err) {
+    if (!isSessionCurrent(pack.id, version)) return { text: "", stale: true };
     console.warn("agent turn failed", err && err.stack ? err.stack : err);
     source = "local-fallback";
     lastText = local.text;
@@ -260,6 +278,7 @@ async function runAgentTurn({
     if (signal) signal.removeEventListener("abort", onParentAbort);
   }
 
+  if (!isSessionCurrent(pack.id, version)) return { text: "", stale: true };
   if (!lastText) lastText = local.text || "嗯。";
   if (didMove) {
     applyPlay?.(null, lastText);
@@ -298,6 +317,9 @@ module.exports = {
   getHistory,
   pushHistory,
   clearSessions,
+  clearSession,
+  sessionVersion,
+  isSessionCurrent,
   buildSystemPrompt,
   MAX_ROUNDS,
   MAX_TURN_MS,

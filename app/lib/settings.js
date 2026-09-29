@@ -111,11 +111,13 @@ function sanitizePartial(partial) {
 }
 
 function readStored(userData) {
-  try {
-    const file = settingsPath(userData);
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8")) || {};
-  } catch (_) {}
-  return {};
+  const file = settingsPath(userData);
+  if (!fs.existsSync(file)) return {};
+  const stored = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+    throw new Error("设置文件格式无效");
+  }
+  return stored;
 }
 
 function applyStored(stored) {
@@ -149,8 +151,12 @@ function applyStored(stored) {
 }
 
 function writeDisk(userData, settings, { sealKey } = {}) {
-  const disk = applyStored(settings);
+  // Keep fields written by older versions, but never accept unknown renderer patches.
+  const disk = { ...readStored(userData), ...applyStored(settings) };
   delete disk.deepseekApiKey;
+  delete disk.deepseekApiKeyEnc;
+  delete disk.retainPlaintextKey;
+  delete disk.previousPlaintextKey;
   let keyError = null;
   if (settings.deepseekApiKey === null) {
     // explicit clear: omit both the plaintext key and the ciphertext

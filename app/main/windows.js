@@ -107,6 +107,7 @@ function openPetMenu(pt) {
 async function runChatter() {
   const pack = currentPack();
   if (!pack) return;
+  const version = agent.sessionVersion(pack.id);
   const pet = require("./pet-window");
   const pub = presentSettings(loadSettings());
   if (pub.deepseekEnabled && pub.hasDeepseekKey) {
@@ -117,9 +118,14 @@ async function runChatter() {
         userText: "请对主人碎碎念几句，像陪在旁边随口说，可以稍长一些。不要提你是AI，也不要列清单。",
         userData: userData(),
         ...require("../lib/chatter").chatterTurnExtras(),
-        applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
-        applyMove: (dir, dist) => pet.movePet(dir, dist),
+        applyPlay: (action, line, move) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.sendPlay(action, line, move);
+        },
+        applyMove: (dir, dist) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.movePet(dir, dist);
+        },
       });
+      if (!agent.isSessionCurrent(pack.id, version) || res?.stale) return;
       if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
       const { noteFromReply, chatterNoteIfFresh } = require("../lib/user-errors");
       const note = chatterNoteIfFresh(noteFromReply(res));
