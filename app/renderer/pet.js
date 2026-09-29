@@ -625,7 +625,15 @@ async function bootstrap() {
     }
   });
 
-  const floater = window.PetFloater.mount(stage);
+  const floaterHost = document.getElementById("layout") || stage;
+  const floater = window.PetFloater.mount(floaterHost, {
+    width() {
+      return floaterHost.clientWidth || (currentPack?.size?.width || 64) + 32;
+    },
+    height() {
+      return floaterHost.clientHeight || 352;
+    },
+  });
   window.petApi.onFloatText?.((text) => floater.show(text));
   window.petApi.onShowBubble?.((text) => showBubble(text));
 
@@ -634,95 +642,123 @@ async function bootstrap() {
   });
 
   const listenDot = document.getElementById("listen-dot");
-  let micToken = 0;
-  let mediaStream = null;
-  let mediaRecorder = null;
-  let chunks = [];
+  const mic = window.PetMicSession.create();
 
-  function pickMime() {
-    const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg"];
-    for (const t of types) {
-      if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  function recordOf(payload) {
+    if (payload && typeof payload === "object") {
+      return { cmd: payload.cmd, sessionId: payload.sessionId };
     }
-    return "audio/webm";
+    return { cmd: payload, sessionId: undefined };
   }
 
-  async function discardMic() {
-    micToken += 1;
-    const rec = mediaRecorder;
-    const stream = mediaStream;
-    mediaRecorder = null;
-    mediaStream = null;
-    chunks = [];
+  async function discardMic(sessionId) {
+    const rec = mic.markCancel(sessionId);
     if (listenDot) listenDot.classList.remove("on");
     if (rec) {
-      rec.onstop = () => {};
       try {
-        if (rec.state !== "inactive") rec.stop();
+        await rec.stop(false);
       } catch (_) {}
     }
-    (stream?.getTracks() || []).forEach((t) => t.stop());
   }
 
-  async function startMic() {
-    const token = ++micToken;
-    chunks = [];
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    if (token !== micToken) {
-      stream.getTracks().forEach((t) => t.stop());
+  async function startMic(sessionId) {
+    const mine = mic.begin(sessionId);
+    const rec = window.PetPcm.create();
+    try {
+      await rec.start();
+    } catch (err) {
+      try {
+        await rec.stop(false);
+      } catch (_) {}
+      throw err;
+    }
+    if (!mic.accept(mine, rec)) {
+      try {
+        await rec.stop(false);
+      } catch (_) {}
+      try {
+        await window.petApi.voiceCancel?.(sessionId);
+      } catch (_) {}
       return;
     }
-    mediaStream = stream;
-    const mime = pickMime();
-    mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mime });
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data && e.data.size) chunks.push(e.data);
-    };
-    mediaRecorder.start();
     if (listenDot) listenDot.classList.add("on");
   }
 
-  async function stopMicAndSend() {
-    const rec = mediaRecorder;
-    const stream = mediaStream;
-    mediaRecorder = null;
-    mediaStream = null;
+  async function stopMicAndSend(sessionId) {
+    const rec = mic.markStop(sessionId);
     if (listenDot) listenDot.classList.remove("on");
-    if (!rec) return;
-    const blob = await new Promise((resolve) => {
-      rec.onstop = () =>
-        resolve(new Blob(chunks, { type: rec.mimeType || "audio/webm" }));
+    if (rec === undefined) return;
+    const early = window.PetUserErrors?.TOO_EARLY || "没听清，按住稍久一点再说";
+    const failed = window.PetUserErrors?.VOICE_PROCESS_FAILED || "语音处理出错，请再试一次";
+    if (!rec) {
       try {
-        rec.stop();
-      } catch {
-        resolve(new Blob(chunks, { type: "audio/webm" }));
-      }
-    });
-    (stream?.getTracks() || []).forEach((t) => t.stop());
-    const buf = new Uint8Array(await blob.arrayBuffer());
-    await window.petApi.transcribeAudio(buf, blob.type || "audio/webm", true);
-  }
-
-  window.petApi.onVoiceRecord?.(async (cmd) => {
+        await window.petApi.voiceCancel?.(sessionId);
+      } catch (_) {}
+      showBubble(early);
+      return;
+    }
+    let buf;
     try {
-      if (cmd === "start") await startMic();
-      if (cmd === "stop") await stopMicAndSend();
-      if (cmd === "cancel") await discardMic();
+      buf = await rec.stop(true);
     } catch (err) {
       console.error(err);
-      if (listenDot) listenDot.classList.remove("on");
-      if (cmd !== "stop") return;
       try {
-        await window.petApi.transcribeAudio(new Uint8Array(0), "audio/webm", true);
+        await window.petApi.voiceCancel?.(sessionId);
       } catch (_) {}
+      showBubble(failed);
+      return;
+    }
+    let result;
+    try {
+      result = await window.petApi.transcribeAudio(buf, "audio/wav", true, sessionId);
+    } catch (err) {
+      console.error(err);
+      try {
+        await window.petApi.voiceCancel?.(sessionId);
+      } catch (_) {}
+      showBubble(failed);
+      return;
+    }
+    if (result && result.ok === false && result.error === "too-short") showBubble(early);
+  }
+
+  async function showMicProblem(err, sessionId, fallback) {
+    console.error(err);
+    if (listenDot) listenDot.classList.remove("on");
+    let ignored = false;
+    try {
+      const res = await window.petApi.voiceCancel?.(sessionId);
+      ignored = Boolean(res && res.ignored);
+    } catch (cancelErr) {
+      console.error(cancelErr);
+    }
+    if (ignored) return;
+    const known = window.PetUserErrors?.micFailureMessage?.(err);
+    showBubble(known || fallback);
+  }
+
+  window.petApi.onVoiceRecord?.(async (payload) => {
+    const { cmd, sessionId } = recordOf(payload);
+    try {
+      if (cmd === "start") await startMic(sessionId);
+      if (cmd === "stop") await stopMicAndSend(sessionId);
+      if (cmd === "cancel") await discardMic(sessionId);
+    } catch (err) {
+      const fallback = "没能打开麦克风，请检查系统麦克风设置";
+      await showMicProblem(err, sessionId, fallback);
     }
   });
 
   window.petApi.onVoiceState?.((s) => {
-    if (listenDot) {
-      if (s?.state === "listening") listenDot.classList.add("on");
-      if (s?.state === "idle") listenDot.classList.remove("on");
-    }
+    window.PetVoicePresent.presentVoiceState(s, {
+      setListenDot(on) {
+        if (!listenDot) return;
+        listenDot.classList.toggle("on", on);
+      },
+      floatText(text) {
+        window.petApi.floatText(text);
+      },
+    });
   });
 
   window.petApi.onComposeFlag?.((on) => {
@@ -847,86 +883,6 @@ async function bootstrap() {
     if (ptr?.dragging || dragging) return;
     window.petApi.openPetMenu?.({ x: e.screenX, y: e.screenY });
   });
-
-  window.__petTest = {
-    getState: () => ({
-      currentStateName,
-      facing,
-      dragging,
-      lifeEnabled,
-      composeOpen,
-      lastKind,
-      lastAction,
-      roaming: Boolean(roamRaf),
-      lifted: puppet?.classList.contains("lifted"),
-    }),
-    catalog: () => catalog(),
-    clickAck: () => playClickReaction(),
-    openCompose: () => window.petApi.setComposeOpen?.({ compose: true }),
-    openHistory: () => window.petApi.openChat?.(),
-    closeCompose: () => window.petApi.setComposeOpen?.({ compose: false }),
-    openMenu: (pt) => window.petApi.openPetMenu?.(pt || { x: 80, y: 80 }),
-    showBubble: (text, ms) => showBubble(text, ms),
-    play: (name) => playState(name, { force: true, reason: "event" }),
-    walkMove: (opts) => {
-      bumpLife();
-      return startDirectedWalk({
-        token: lifeToken,
-        direction: opts?.direction || "left",
-        distance: opts?.distance || 220,
-        actionName: opts?.actionName || "walk",
-        then: "idle",
-      });
-    },
-    frameSrc: () => frontLayer().currentSrc || sprite.currentSrc,
-    pinFrame: (url) =>
-      new Promise((resolve) => {
-        bumpLife();
-        busy = true;
-        lifeEnabled = false;
-        clearAnimTimer();
-        framePaintToken += 1;
-        const token = framePaintToken;
-        frontIsA = true;
-        sprite.classList.add("snap");
-        if (spriteB) spriteB.classList.add("snap");
-        const done = () => {
-          if (token !== framePaintToken) return resolve(url);
-          resolve(sprite.currentSrc || url);
-        };
-        sprite.onload = done;
-        sprite.onerror = done;
-        sprite.src = url;
-        sprite.classList.add("show");
-        if (spriteB) {
-          spriteB.removeAttribute("src");
-          spriteB.classList.remove("show");
-        }
-        if (sprite.complete && sprite.naturalWidth) done();
-      }),
-    /** Rapid-fire action spam for flicker regression checks. */
-    spamActions: (names, times = 12) => {
-      const list = Array.isArray(names) && names.length ? names : Object.keys(currentPack?.states || {});
-      let i = 0;
-      for (let n = 0; n < times; n++) {
-        const name = list[i % list.length];
-        i += 1;
-        playState(name, { force: true, reason: "event" });
-      }
-      const aShow = sprite.classList.contains("show");
-      const bShow = spriteB ? spriteB.classList.contains("show") : false;
-      return {
-        currentStateName,
-        frontIsA,
-        aShow,
-        bShow,
-        covered: aShow || bShow,
-        token: framePaintToken,
-      };
-    },
-    setFacing,
-    setDragging,
-  };
 }
 
 bootstrap().catch(console.error);

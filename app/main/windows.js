@@ -1,6 +1,8 @@
+const fs = require("fs");
+const path = require("path");
 const { BrowserWindow, screen, dialog } = require("electron");
+const { browserWebPreferences, hardenWindow } = require("./window-guard");
 const dialogue = require("../lib/dialogue");
-const settingsLib = require("../lib/settings");
 const agent = require("../lib/agent");
 const chatLog = require("../lib/chat-log");
 const { ACTION_LABELS } = require("../lib/tools");
@@ -12,6 +14,7 @@ const {
   currentPack,
   loadSettings,
   saveSettings,
+  presentSettings,
   userData,
   importedDir,
   cacheDir,
@@ -28,17 +31,13 @@ function dialogWindowOptions(extra = {}) {
     resizable: true,
     hasShadow: true,
     thickFrame: true,
-    webPreferences: {
-      preload: appFile("preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: browserWebPreferences(),
     ...extra,
   };
 }
 
 function createDialog(opts) {
-  const win = new BrowserWindow(dialogWindowOptions(opts));
+  const win = hardenWindow(new BrowserWindow(dialogWindowOptions(opts)));
   win.once("ready-to-show", () => win.show());
   return win;
 }
@@ -84,12 +83,9 @@ function openPetMenu(pt) {
     hasShadow: false,
     focusable: true,
     show: false,
-    webPreferences: {
-      preload: appFile("preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: browserWebPreferences(),
   });
+  hardenWindow(state.petMenuWindow);
   state.petMenuWindow.setAlwaysOnTop(true, "screen-saver");
   state.petMenuWindow.loadFile(appFile("renderer", "pet-menu.html"));
   let menuBlurArmed = false;
@@ -111,8 +107,9 @@ function openPetMenu(pt) {
 async function runChatter() {
   const pack = currentPack();
   if (!pack) return;
+  const version = agent.sessionVersion(pack.id);
   const pet = require("./pet-window");
-  const pub = settingsLib.publicSettings(loadSettings());
+  const pub = presentSettings(loadSettings());
   if (pub.deepseekEnabled && pub.hasDeepseekKey) {
     try {
       const res = await agent.runAgentTurn({
@@ -120,11 +117,19 @@ async function runChatter() {
         settings: loadSettings(),
         userText: "请对主人碎碎念几句，像陪在旁边随口说，可以稍长一些。不要提你是AI，也不要列清单。",
         userData: userData(),
-        captureScreen: pet.capturePrimaryJpeg,
-        applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
-        applyMove: (dir, dist) => pet.movePet(dir, dist),
+        ...require("../lib/chatter").chatterTurnExtras(),
+        applyPlay: (action, line, move) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.sendPlay(action, line, move);
+        },
+        applyMove: (dir, dist) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.movePet(dir, dist);
+        },
       });
+      if (!agent.isSessionCurrent(pack.id, version) || res?.stale) return;
       if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
+      const { noteFromReply, chatterNoteIfFresh } = require("../lib/user-errors");
+      const note = chatterNoteIfFresh(noteFromReply(res));
+      if (note) pet.floatText(note);
       return;
     } catch (_) {}
   }
@@ -176,34 +181,16 @@ function revealPetChat({ history = false } = {}) {
   require("./compose").openComposeWindow();
 }
 
-function openSetupWindow() {
-  if (state.setupWindow && !state.setupWindow.isDestroyed()) {
-    state.setupWindow.focus();
-    return;
-  }
-  state.setupWindow = createDialog({
-    width: 440,
-    height: 620,
-    minWidth: 380,
-    minHeight: 480,
-    title: "环境依赖",
-  });
-  state.setupWindow.loadFile(appFile("renderer", "setup.html"));
-  state.setupWindow.on("closed", () => {
-    state.setupWindow = null;
-  });
-}
-
 function openSettingsWindow() {
   if (state.settingsWindow && !state.settingsWindow.isDestroyed()) {
     state.settingsWindow.focus();
     return;
   }
   state.settingsWindow = createDialog({
-    width: 400,
-    height: 700,
+    width: 420,
+    height: 760,
     minWidth: 360,
-    minHeight: 520,
+    minHeight: 560,
     title: "设置",
   });
   state.settingsWindow.loadFile(appFile("renderer", "settings.html"));
@@ -212,45 +199,103 @@ function openSettingsWindow() {
   });
 }
 
-async function importPackDialog() {
-  const pet = require("./pet-window");
-  const picked = await dialog.showOpenDialog({
-    title: "导入角色包",
-    properties: ["openFile"],
-    filters: [
-      { name: "桌宠包", extensions: ["dpet"] },
-      { name: "全部", extensions: ["*"] },
-    ],
-  });
-  if (picked.canceled || !picked.filePaths[0]) return;
+function lastImportDirFile() {
+  return path.join(userData(), "last-import-dir.txt");
+}
+
+function readLastImportDir() {
   try {
-    const pack = importDpet(picked.filePaths[0], importedDir(), cacheDir());
-    saveSettings({ packId: pack.id });
-    pet.resizePetToPack(pack);
-    state.petWindow?.webContents.send("pack-changed", pack.id);
-    require("./tray").rebuildTrayMenu();
-    dialog.showMessageBox({
-      type: "info",
-      message: `已导入 ${pack.name}（${pack.id}）`,
-    });
+    const dir = fs.readFileSync(lastImportDirFile(), "utf8").trim();
+    if (dir && fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return dir;
+  } catch (_) {}
+  return "";
+}
+
+function clearLastImportDir() {
+  try {
+    fs.rmSync(lastImportDirFile(), { force: true });
+  } catch (err) {
+    console.warn("clear import dir", err && err.message ? err.message : err);
+  }
+}
+
+function rememberChosenImport(chosen) {
+  writeLastImportDir(path.dirname(chosen));
+}
+
+function writeLastImportDir(dir) {
+  if (!dir) return;
+  try {
+    fs.mkdirSync(userData(), { recursive: true });
+    fs.writeFileSync(lastImportDirFile(), dir, "utf8");
+  } catch (err) {
+    console.warn("remember import dir", err && err.message ? err.message : err);
+  }
+}
+
+function importOpenOptions(extra) {
+  const opts = { ...extra };
+  const start = readLastImportDir();
+  if (start) opts.defaultPath = start;
+  return opts;
+}
+
+function importedPackMessage(pack) {
+  const name = (pack && (pack.name || pack.persona?.displayName)) || "新角色";
+  return `已导入并切换到「${name}」`;
+}
+
+function finishImportedPack(pack) {
+  const pet = require("./pet-window");
+  saveSettings({ packId: pack.id });
+  pet.resizePetToPack(pack);
+  state.petWindow?.webContents.send("pack-changed", pack.id);
+  require("./tray").rebuildTrayMenu();
+  dialog.showMessageBox({
+    type: "info",
+    message: importedPackMessage(pack),
+  });
+}
+
+async function importPackDialog() {
+  const picked = await dialog.showOpenDialog(
+    importOpenOptions({
+      title: "导入角色包",
+      properties: ["openFile"],
+      filters: [
+        { name: "桌宠包", extensions: ["dpet"] },
+        { name: "全部", extensions: ["*"] },
+      ],
+    })
+  );
+  if (picked.canceled || !picked.filePaths[0]) return;
+  const chosen = picked.filePaths[0];
+  rememberChosenImport(chosen);
+  try {
+    finishImportedPack(importDpet(chosen, importedDir(), cacheDir()));
   } catch (err) {
     dialog.showErrorBox("导入失败", String(err.message || err));
   }
 }
 
 async function importPackFolder() {
-  const pet = require("./pet-window");
-  const picked = await dialog.showOpenDialog({
-    title: "导入角色包文件夹",
-    properties: ["openDirectory"],
-  });
+  const picked = await dialog.showOpenDialog(
+    importOpenOptions({
+      title: "导入角色包文件夹",
+      properties: ["openDirectory"],
+    })
+  );
   if (picked.canceled || !picked.filePaths[0]) return null;
-  const pack = importFolder(picked.filePaths[0], importedDir());
-  saveSettings({ packId: pack.id });
-  pet.resizePetToPack(pack);
-  state.petWindow?.webContents.send("pack-changed", pack.id);
-  require("./tray").rebuildTrayMenu();
-  return pack;
+  const chosen = picked.filePaths[0];
+  rememberChosenImport(chosen);
+  try {
+    const pack = importFolder(chosen, importedDir());
+    finishImportedPack(pack);
+    return pack;
+  } catch (err) {
+    dialog.showErrorBox("导入失败", String(err.message || err));
+    return null;
+  }
 }
 
 module.exports = {
@@ -258,10 +303,13 @@ module.exports = {
   menuActions,
   openPetMenu,
   runChatter,
+  finishImportedPack,
   openChatWindow,
   revealPetChat,
-  openSetupWindow,
   openSettingsWindow,
   importPackDialog,
   importPackFolder,
+  clearLastImportDir,
+  rememberChosenImport,
+  readLastImportDir,
 };

@@ -20,16 +20,13 @@ function fill(s) {
   $("alwaysOnTop").checked = Boolean(s.alwaysOnTop);
   $("lifeStream").checked = s.lifeStream === true;
   $("hideOnFullscreen").checked = s.hideOnFullscreen !== false;
-  $("deepseekBaseUrl").value = s.deepseekBaseUrl || "https://api.deepseek.com";
   $("deepseekModel").value = s.deepseekModel || "deepseek-flash";
   $("visionModel").value = s.visionModel || "deepseek-flash";
   if (!document.activeElement || !document.activeElement.classList.contains("hotkey")) {
     showHotkey($("hideHotkey"), s.hideHotkey);
     showHotkey($("voiceHotkey"), s.voiceHotkey);
   }
-  $("keyHint").textContent = s.hasDeepseekKey
-    ? `已保存 Key：${s.deepseekApiKeyMasked}`
-    : "尚未保存 Key。也可把 Key 放在仓库根目录 secrets.local.json（不会进 git）。";
+  $("keyHint").textContent = window.PetUserErrors.keyHintText(s);
 }
 
 function bindCapture(el) {
@@ -90,7 +87,6 @@ $("save").addEventListener("click", async () => {
     alwaysOnTop: $("alwaysOnTop").checked,
     lifeStream: $("lifeStream").checked,
     hideOnFullscreen: $("hideOnFullscreen").checked,
-    deepseekBaseUrl: $("deepseekBaseUrl").value.trim(),
     deepseekModel: $("deepseekModel").value.trim(),
     visionModel: $("visionModel").value.trim(),
     hideHotkey,
@@ -98,7 +94,13 @@ $("save").addEventListener("click", async () => {
   };
   const key = $("deepseekApiKey").value.trim();
   if (key) partial.deepseekApiKey = key;
-  const next = await window.petApi.saveSettings(partial);
+  let next;
+  try {
+    next = await window.petApi.saveSettings(partial);
+  } catch (err) {
+    $("status").textContent = window.PetUserErrors.displaySaveError(err);
+    return;
+  }
   $("deepseekApiKey").value = "";
   fill(next);
   const bind = next.hotkeyBind || {};
@@ -110,15 +112,80 @@ $("save").addEventListener("click", async () => {
     : "已保存。快捷键立即生效。";
 });
 
+$("clearApiKey").addEventListener("click", async () => {
+  if (!window.confirm("清除已保存的 API Key？")) return;
+  let next;
+  try {
+    next = await window.petApi.saveSettings({ deepseekApiKey: null });
+  } catch (err) {
+    $("status").textContent = window.PetUserErrors.displaySaveError(err);
+    return;
+  }
+  $("deepseekApiKey").value = "";
+  fill(next);
+  $("status").textContent = "已清除 API Key。";
+});
+
+const forgetModal = $("forget-modal");
+const forgetPhrase = $("forget-phrase");
+const forgetConfirm = $("forget-confirm");
+let forgetPending = false;
+let forgetPackId = null;
+let forgetOpenId = 0;
+
+function closeForget() {
+  forgetOpenId += 1;
+  forgetPackId = null;
+  forgetModal.hidden = true;
+  forgetPhrase.value = "";
+  forgetConfirm.disabled = true;
+  $("forget-status").textContent = "";
+}
+
 $("clearMem").addEventListener("click", async () => {
-  await window.petApi.clearMemory();
-  $("status").textContent = "当前角色记忆已清空。";
+  const openId = ++forgetOpenId;
+  try {
+    const pack = await window.petApi.getCurrentPack();
+    if (openId !== forgetOpenId) return;
+    if (!pack?.id) throw new Error("当前没有可清空的角色。");
+    forgetPackId = pack.id;
+    $("forget-pack").textContent = `当前角色：${pack.name || pack.id}（ID：${pack.id}）`;
+    $("forget-status").textContent = "";
+    forgetPhrase.value = "";
+    forgetConfirm.disabled = true;
+    forgetModal.hidden = false;
+    forgetPhrase.focus();
+  } catch (err) {
+    $("status").textContent = String(err?.message || err);
+  }
+});
+$("forget-cancel").addEventListener("click", closeForget);
+forgetPhrase.addEventListener("input", () => {
+  forgetConfirm.disabled = forgetPhrase.value !== "goodbye";
+});
+$("forget-card").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (forgetPending || !forgetPackId || forgetPhrase.value !== "goodbye") return;
+  forgetPending = true;
+  forgetConfirm.disabled = true;
+  try {
+    const result = await window.petApi.clearMemory(forgetPackId, forgetPhrase.value);
+    if (!result?.ok) throw new Error(result?.error || "清空失败。");
+    closeForget();
+    $("status").textContent = "当前角色的记忆和聊天记录已清空。";
+  } catch (err) {
+    const message = String(err?.message || err);
+    $("status").textContent = message;
+    $("forget-status").textContent = message;
+    forgetConfirm.disabled = false;
+  } finally {
+    forgetPending = false;
+  }
 });
 
 $("importDpet").addEventListener("click", () => window.petApi.importPack());
 $("importFolder").addEventListener("click", () => window.petApi.importPackFolder());
-$("deps").addEventListener("click", () => window.petApi.openDeps());
 
 init().catch((err) => {
-  $("status").textContent = String(err.message || err);
+  $("status").textContent = window.PetUserErrors.displaySaveError(err);
 });

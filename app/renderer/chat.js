@@ -25,12 +25,20 @@ function addRow(cls, text) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+function addFallbackRow(reply) {
+  let note = "";
+  if (reply && Object.prototype.hasOwnProperty.call(reply, "fallbackNote")) note = reply.fallbackNote || "";
+  else note = window.PetUserErrors?.replyFallbackNote?.(reply) || "";
+  if (note) addRow("meta", note);
+  if (reply?.usedVision) addRow("meta", "已查看屏幕，画面已发送");
+}
+
 function applyHint(settings) {
   const bits = [];
   if (settings?.deepseekEnabled && settings?.hasDeepseekKey) bits.push("DeepSeek 对话开");
   else bits.push("本地规则（DeepSeek 关）");
   bits.push(settings?.memoryEnabled ? "记忆开" : "记忆关");
-  bits.push(settings?.visionEnabled ? "截屏感知开" : "截屏关");
+  bits.push(settings?.visionEnabled ? "允许查看屏幕" : "不查看屏幕");
   if (settings?.voiceHotkey) voiceHotkey = settings.voiceHotkey;
   const voiceLabel = String(voiceHotkey || "")
     .replace("CommandOrControl", "Ctrl")
@@ -38,7 +46,7 @@ function applyHint(settings) {
     .replace(/\+/g, "+");
   hintEl.textContent =
     bits.join(" · ") +
-    `。打字回车发送；按住说话超过一秒，或 ${voiceLabel} 语音（关对话窗也能说）。`;
+    `。打字回车发送；按住说话超过半秒，或 ${voiceLabel} 语音（关对话窗也能说）。`;
   if (inputEl) {
     inputEl.placeholder = voiceLabel
       ? `打字，或按 ${voiceLabel} 说话`
@@ -73,6 +81,9 @@ async function init() {
       p.classList.add("think");
     }
   });
+  window.petApi.onChatCleared?.(() => {
+    logEl.replaceChildren();
+  });
   window.petApi.onChatTurn?.((payload) => {
     const said = asText(payload?.user);
     if (said) addRow("user", `我：${said}`);
@@ -80,6 +91,7 @@ async function init() {
     if (reply?.text) {
       addRow("bot", `${reply.displayName || "桌宠"}：${asText(reply.text)}`);
     }
+    addFallbackRow(reply);
   });
   window.petApi.onVoiceState?.((s) => {
     if (!micBtn) return;
@@ -94,6 +106,7 @@ async function init() {
       const name = reply.displayName || "桌宠";
       addRow("bot", `${name}：${asText(reply.text)}`);
     }
+    addFallbackRow(reply);
   });
 }
 
@@ -107,15 +120,14 @@ async function send(textOverride) {
   try {
     const res = await window.petApi.chat(text);
     think.remove();
+    if (res?.stale) return;
     const name = res?.displayName || "桌宠";
     addRow("bot", `${name}：${res?.text || "…"}`);
-    if (res?.source && res.source !== "deepseek") {
-      addRow("meta", res.error ? `回退本地（${res.error}）` : `来源：${res.source}`);
-    }
-    if (res?.usedVision) addRow("meta", "已看过屏幕（截屏感知）");
+    addFallbackRow(res);
   } catch (err) {
+    console.error(err);
     think.remove();
-    addRow("meta", String(err.message || err));
+    addRow("meta", "这次没能回复，请再试一次");
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();
@@ -136,18 +148,36 @@ inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") send().catch(console.error);
 });
 
+let voiceStartPromise = null;
 window.PetHoldTalk.bind(micBtn, {
   onDown() {
     window.petApi.setComposeHold?.(true);
   },
   onListen() {
-    window.petApi.voiceStart("hold").catch(console.error);
+    voiceStartPromise = window.petApi.voiceStart("hold");
+    Promise.resolve(voiceStartPromise).catch(console.error);
   },
   onSend() {
-    window.petApi.voiceStop().catch(console.error);
+    const pending = voiceStartPromise;
+    voiceStartPromise = null;
+    Promise.resolve(pending)
+      .then((res) => {
+        if (res && res.ok && res.sessionId !== undefined && res.sessionId !== null && res.sessionId !== "") {
+          return window.petApi.voiceStop(res.sessionId);
+        }
+      })
+      .catch(console.error);
   },
   onTooShort() {
-    window.petApi.voiceCancel?.().catch(console.error);
+    const pending = voiceStartPromise;
+    voiceStartPromise = null;
+    Promise.resolve(pending)
+      .then((res) => {
+        if (res && res.ok && res.sessionId !== undefined && res.sessionId !== null && res.sessionId !== "") {
+          return window.petApi.voiceCancel(res.sessionId);
+        }
+      })
+      .catch(console.error);
     window.petApi.floatText(window.PetHoldTalk.TOO_SHORT);
   },
 });

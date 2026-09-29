@@ -1,0 +1,14 @@
+{
+  "name": "desktop-pet-build-tools",
+  "private": true,
+  "description": "Build-time tools for scripts/fetch-vendor.js and scripts/make-icons.js. Not shipped in the installer.",
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "sharp": "0.35.4",
+    "tar": "7.5.22",
+    "unbzip2-stream": "1.4.3",
+    "yauzl": "3.4.0"
+  }
+}

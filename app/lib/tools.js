@@ -91,7 +91,7 @@ function toolDefs({ memoryEnabled, visionEnabled, actions }) {
       function: {
         name: "glance_screen",
         description:
-          "看一眼用户桌面截屏（用户已开启截屏感知）。用于回答「我在干什么/看看屏幕」。",
+          "看一眼用户桌面截屏（用户已打开「允许查看屏幕」）。用于回答「我在干什么/看看屏幕」。截图会发给视觉接口。",
         parameters: { type: "object", properties: {} },
       },
     });

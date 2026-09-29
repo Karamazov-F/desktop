@@ -1,20 +1,34 @@
 const { BrowserWindow, ipcMain } = require("electron");
-const settingsLib = require("../lib/settings");
 const memory = require("../lib/memory");
 const agent = require("../lib/agent");
 const stt = require("../lib/stt");
-const deps = require("../lib/deps");
 const chatLog = require("../lib/chat-log");
 const {
   state,
   BUNDLED_PACKS,
   loadSettings,
   saveSettings,
+  presentSettings,
   allPacks,
   currentPack,
   userData,
-  depsCtx,
 } = require("./state");
+
+const captureOwners = new Set();
+async function notifyCapture(on, owner = "legacy") {
+  if (on) {
+    if (captureOwners.has(owner)) return;
+    const first = captureOwners.size === 0;
+    captureOwners.add(owner);
+    if (first) {
+      require("./pet-window").sendPlay(null, "正在查看屏幕，画面将发送到视觉接口");
+      await require("./capture-notice").setCaptureNotice(true);
+    }
+    return;
+  }
+  if (!captureOwners.delete(owner) || captureOwners.size > 0) return;
+  await require("./capture-notice").setCaptureNotice(false);
+}
 
 function registerIpc() {
   ipcMain.handle("get-bootstrap", (e) => {
@@ -25,7 +39,7 @@ function registerIpc() {
     const senderWin = BrowserWindow.fromWebContents(e.sender);
     if (senderWin === state.petWindow) pet.resizePetToPack(pack);
     return {
-      settings: settingsLib.publicSettings(settings),
+      settings: presentSettings(settings),
       packsDir: BUNDLED_PACKS,
       packs: packs.map((p) => ({ id: p.id, name: p.name })),
       pack,
@@ -57,8 +71,10 @@ function registerIpc() {
   });
 
   ipcMain.handle("chat", async (e, userText) => {
+    const captureOwner = Symbol("chat capture");
     const pack = currentPack();
     if (!pack) return { text: "还没有角色包。", action: null, displayName: "桌宠" };
+    const version = agent.sessionVersion(pack.id);
     const pet = require("./pet-window");
     chatLog.appendChat(userData(), pack.id, "user", userText);
     const from = BrowserWindow.fromWebContents(e.sender);
@@ -79,9 +95,17 @@ function registerIpc() {
         userText,
         userData: userData(),
         captureScreen: pet.capturePrimaryJpeg,
-        applyPlay: (action, line, move) => pet.sendPlay(action, line, move),
-        applyMove: (dir, dist) => pet.movePet(dir, dist),
+        notifyCapture: (on) => notifyCapture(on, captureOwner),
+        applyPlay: (action, line, move) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.sendPlay(action, line, move);
+        },
+        applyMove: (dir, dist) => {
+          if (agent.isSessionCurrent(pack.id, version)) pet.movePet(dir, dist);
+        },
       });
+      if (!agent.isSessionCurrent(pack.id, version) || res?.stale) {
+        return { text: "", stale: true };
+      }
       if (res?.text) chatLog.appendChat(userData(), pack.id, "bot", res.text);
       if (state.chatWindow && !state.chatWindow.isDestroyed() && from !== state.chatWindow) {
         state.chatWindow.webContents.send("chat-turn", { user: userText, reply: res });
@@ -123,34 +147,37 @@ function registerIpc() {
   });
 
   ipcMain.handle("voice-start", async (_e, source) => require("./voice").beginVoice(source || "hotkey"));
-  ipcMain.handle("voice-stop", async () => require("./voice").endVoice());
-  ipcMain.handle("voice-cancel", async () => require("./voice").cancelVoice());
+  ipcMain.handle("voice-stop", async (_e, sessionId) => {
+    if (sessionId === undefined || sessionId === null || sessionId === "") return { ok: false, ignored: true };
+    return require("./voice").endVoice(sessionId);
+  });
+  ipcMain.handle("voice-cancel", async (_e, sessionId) => require("./voice").cancelVoice(sessionId));
 
   ipcMain.handle("transcribe-audio", async (_e, payload) => {
     const voice = require("./voice");
-    const pet = require("./pet-window");
     try {
       const bytes = payload?.data ? Buffer.from(payload.data) : Buffer.alloc(0);
       if (bytes.length < 200) {
-        state.voiceBusy = false;
+        const finished = voice.finishVoice(payload?.sessionId);
+        if (!finished.ok) return { ok: false, error: "stale-session", text: "" };
         voice.notifyVoice("idle");
         return { ok: false, error: "too-short", text: "" };
       }
-      const ext = String(payload?.mime || "audio/webm").includes("wav") ? "wav" : "webm";
-      const text = await stt.transcribeBuffer(bytes, ext);
+      const text = await stt.transcribeBuffer(bytes);
+      if (!voice.isActive(payload?.sessionId)) return { ok: false, error: "stale-session", text: "" };
       const result = await voice.handleTranscribedText(text, {
         autoSend: payload?.autoSend !== false,
+        sessionId: payload?.sessionId,
       });
-      state.voiceBusy = false;
-      state.voiceHotkeyArmed = false;
-      voice.notifyVoice("idle", { text: result.text });
+      if (result.stale) return { ok: false, error: "stale-session", text: "" };
+      voice.settleTranscribed(payload?.sessionId, result);
       return { ok: true, ...result };
     } catch (err) {
-      state.voiceBusy = false;
-      state.voiceHotkeyArmed = false;
-      voice.notifyVoice("idle", { error: String(err.message || err) });
-      pet.sendPlay(null, "语音识别失败。");
-      return { ok: false, error: String(err.message || err), text: "" };
+      console.warn("transcribe failed", err && err.stack ? err.stack : err);
+      const message = require("../lib/user-errors").sttFailureMessage(err);
+      const finished = voice.failTranscribe(payload?.sessionId, message);
+      if (!finished.ok) return { ok: false, error: "stale-session", text: "" };
+      return { ok: false, error: message, text: "" };
     }
   });
 
@@ -163,7 +190,7 @@ function registerIpc() {
     if (win && win !== state.petWindow) win.close();
   });
 
-  ipcMain.handle("get-settings", () => settingsLib.publicSettings(loadSettings()));
+  ipcMain.handle("get-settings", () => presentSettings(loadSettings()));
 
   ipcMain.handle("save-settings", (_e, partial) => {
     const tray = require("./tray");
@@ -172,7 +199,7 @@ function registerIpc() {
     const hotkeyBind = tray.registerHotkeys();
     tray.notifySettings();
     tray.rebuildTrayMenu();
-    return { ...settingsLib.publicSettings(next), hotkeyBind };
+    return { ...presentSettings(next), hotkeyBind };
   });
 
   ipcMain.handle("set-compose-open", (_e, open) => {
@@ -187,23 +214,35 @@ function registerIpc() {
     const compose = require("./compose");
     state.petComposeHover = Boolean(hovered);
     if (state.petComposeHover) compose.openComposeWindow({ focus: false });
-    else compose.scheduleComposeHoverClose();
+    else compose.pointerLeftCompose();
   });
 
   ipcMain.on("compose-hover", (_e, hovered) => {
     const compose = require("./compose");
     state.composerHover = Boolean(hovered);
     if (state.composerHover) clearTimeout(state.composeHoverCloseTimer);
-    else compose.scheduleComposeHoverClose();
+    else compose.pointerLeftCompose();
   });
 
-  ipcMain.on("compose-expanded", (_e, expanded) => {
+  ipcMain.on("compose-expanded", (e, expanded) => {
+    if (!state.composeWindow || state.composeWindow.isDestroyed()) return;
+    if (e.sender !== state.composeWindow.webContents || e.senderFrame !== e.sender.mainFrame) return;
     const compose = require("./compose");
     const was = state.composeExpanded;
     state.composeExpanded = Boolean(expanded);
+    if (state.composeExpanded) compose.markComposeInteraction();
     if (state.composeExpanded) compose.positionComposeBesidePet();
     if (state.composeExpanded && !was) compose.armDismiss();
     compose.syncOutsideWatch();
+  });
+
+  ipcMain.on("compose-hint-text", (e, text, source) => {
+    if (!state.composeWindow || state.composeWindow.isDestroyed()) return;
+    if (e.sender !== state.composeWindow.webContents || e.senderFrame !== e.sender.mainFrame) return;
+    if (typeof text !== "string") return;
+    state.composeHintText = text.slice(0, 4096);
+    state.composeHintIsNote = source === "note";
+    if (state.composeExpanded) require("./compose").positionComposeBesidePet();
   });
 
   ipcMain.on("compose-hold", (_e, on) => {
@@ -214,9 +253,7 @@ function registerIpc() {
   });
 
   ipcMain.on("float-text", (_e, text) => {
-    const label = String(text || "").trim().slice(0, 48);
-    if (!label || !state.petWindow || state.petWindow.isDestroyed()) return;
-    state.petWindow.webContents.send("float-text", label);
+    require("./pet-window").floatText(text);
   });
 
   ipcMain.on("pet-drag-by", (_e, delta) => {
@@ -238,50 +275,48 @@ function registerIpc() {
     };
   });
 
-  ipcMain.handle("open-deps", () => {
-    require("./windows").openSetupWindow();
-    return true;
-  });
-
-  ipcMain.handle("deps-status", () => deps.scan(depsCtx()));
-
-  ipcMain.handle("deps-install", async (_e, ids) => {
-    try {
-      const ctx = depsCtx();
-      stt.setContext(ctx);
-      await deps.installIds(ctx, Array.isArray(ids) ? ids : []);
-      stt.setContext(depsCtx());
-      return { ok: true, rows: deps.scan(depsCtx()) };
-    } catch (err) {
-      return { ok: false, error: String(err.message || err), rows: deps.scan(depsCtx()) };
-    }
-  });
-
-  ipcMain.handle("deps-continue", () => {
-    if (state.setupWindow && !state.setupWindow.isDestroyed()) state.setupWindow.close();
-    const rows = deps.scan(depsCtx());
-    const missing = deps.missingRequired(rows);
-    if (!missing.length) stt.warmup();
-    return { ok: true };
-  });
-
   ipcMain.handle("get-chat-log", () => {
     const pack = currentPack();
     return pack ? chatLog.loadChat(userData(), pack.id) : [];
   });
 
-  ipcMain.handle("clear-memory", () => {
+  ipcMain.handle("get-current-pack", () => {
     const pack = currentPack();
-    if (pack) memory.clearMemory(userData(), pack.id);
-    return { ok: true };
+    return pack ? { id: pack.id, name: pack.persona?.displayName || pack.name || pack.id } : null;
+  });
+
+  ipcMain.handle("clear-memory", (_e, request) => {
+    if (request?.phrase !== "goodbye") return { ok: false, error: "请输入 goodbye 后再确认。" };
+    const pack = currentPack();
+    if (!pack) return { ok: false, error: "当前没有可清空的角色。" };
+    if (request.packId !== pack.id) {
+      return { ok: false, error: "角色已切换，请重新打开清空确认框。" };
+    }
+    agent.clearSession(pack.id);
+    try {
+      memory.clearMemory(userData(), pack.id);
+    } catch (err) {
+      return { ok: false, memoryCleared: null, chatCleared: false,
+        error: "记忆清空状态未确认，聊天记录未清空。请先备份并检查本机数据。" };
+    }
+    try {
+      chatLog.clearChat(userData(), pack.id);
+    } catch (err) {
+      return { ok: false, partial: true, memoryCleared: true, chatCleared: false,
+        error: "当前角色的记忆已清空，但聊天记录未清空。请先备份并检查本机数据。" };
+    }
+    if (state.chatWindow && !state.chatWindow.isDestroyed()) {
+      state.chatWindow.webContents.send("chat-cleared");
+    }
+    return { ok: true, memoryCleared: true, chatCleared: true };
   });
 
   ipcMain.handle("import-pack", async () => {
     await require("./windows").importPackDialog();
-    return settingsLib.publicSettings(loadSettings());
+    return presentSettings(loadSettings());
   });
 
   ipcMain.handle("import-pack-folder", async () => require("./windows").importPackFolder());
 }
 
-module.exports = { registerIpc };
+module.exports = { registerIpc, notifyCapture };

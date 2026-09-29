@@ -6,19 +6,20 @@ contextBridge.exposeInMainWorld("petApi", {
   getBootstrap: () => ipcRenderer.invoke("get-bootstrap"),
   setPack: (packId) => ipcRenderer.invoke("set-pack", packId),
   getSettings: () => ipcRenderer.invoke("get-settings"),
+  getCurrentPack: () => ipcRenderer.invoke("get-current-pack"),
   saveSettings: (partial) => ipcRenderer.invoke("save-settings", partial),
-  clearMemory: () => ipcRenderer.invoke("clear-memory"),
+  clearMemory: (packId, phrase) => ipcRenderer.invoke("clear-memory", { packId, phrase }),
   importPack: () => ipcRenderer.invoke("import-pack"),
   importPackFolder: () => ipcRenderer.invoke("import-pack-folder"),
   resizeToPack: (size) => ipcRenderer.invoke("resize-to-pack", size),
   chat: (text) => ipcRenderer.invoke("chat", text),
   openChat: () => ipcRenderer.invoke("open-chat"),
-  openDeps: () => ipcRenderer.invoke("open-deps"),
   setMousePassthrough: (pass) => ipcRenderer.send("mouse-passthrough", pass),
   setComposeOpen: (open) => ipcRenderer.invoke("set-compose-open", open),
   setComposeHover: (hovered) => ipcRenderer.send("compose-hover", Boolean(hovered)),
   setPetComposeHover: (hovered) => ipcRenderer.send("pet-compose-hover", Boolean(hovered)),
   setComposeExpanded: (expanded) => ipcRenderer.send("compose-expanded", Boolean(expanded)),
+  setComposeHintText: (text, source) => ipcRenderer.send("compose-hint-text", String(text || "").slice(0, 4096), source === "note" ? "note" : "other"),
   floatText: (text) => ipcRenderer.send("float-text", String(text || "")),
   setComposeHold: (on) => ipcRenderer.send("compose-hold", Boolean(on)),
   onComposeLayout: (cb) => ipcRenderer.on("compose-layout", (_e, layout) => cb(layout || {})),
@@ -30,17 +31,15 @@ contextBridge.exposeInMainWorld("petApi", {
   nudgeBy: (delta) => ipcRenderer.send("pet-nudge-by", delta),
   getWorkArea: () => ipcRenderer.invoke("get-work-area"),
   voiceStart: (source) => ipcRenderer.invoke("voice-start", source || "hotkey"),
-  voiceStop: () => ipcRenderer.invoke("voice-stop"),
-  voiceCancel: () => ipcRenderer.invoke("voice-cancel"),
-  transcribeAudio: (bytes, mime, autoSend) =>
+  voiceStop: (sessionId) => ipcRenderer.invoke("voice-stop", sessionId),
+  voiceCancel: (sessionId) => ipcRenderer.invoke("voice-cancel", sessionId),
+  transcribeAudio: (bytes, mime, autoSend, sessionId) =>
     ipcRenderer.invoke("transcribe-audio", {
       data: bytes,
       mime,
       autoSend,
+      sessionId,
     }),
-  depsStatus: () => ipcRenderer.invoke("deps-status"),
-  depsInstall: (ids) => ipcRenderer.invoke("deps-install", ids),
-  depsContinue: () => ipcRenderer.invoke("deps-continue"),
   getChatLog: () => ipcRenderer.invoke("get-chat-log"),
   onPackChanged: (cb) => {
     ipcRenderer.on("pack-changed", (_e, id) => cb(id));
@@ -75,16 +74,19 @@ contextBridge.exposeInMainWorld("petApi", {
   onComposeHint: (cb) => {
     ipcRenderer.on("compose-hint", (_e, text) => cb(text || ""));
   },
+  onComposeNote: (cb) => {
+    ipcRenderer.on("compose-note", (_e, payload) => cb(payload || {}));
+  },
   onFloatText: (cb) => {
     ipcRenderer.on("float-text", (_e, text) => cb(text || ""));
-  },
-  onDepsProgress: (cb) => {
-    ipcRenderer.on("deps-progress", (_e, p) => cb(p));
   },
   onThinking: (cb) => {
     ipcRenderer.on("chat-thinking", (_e, on) => cb(on));
   },
   onChatTurn: (cb) => {
     ipcRenderer.on("chat-turn", (_e, payload) => cb(payload || {}));
+  },
+  onChatCleared: (cb) => {
+    ipcRenderer.on("chat-cleared", () => cb());
   },
 });

@@ -1,199 +1,240 @@
 const { spawn } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const deps = require("./deps");
 const paths = require("./paths");
 
-const WORKER = path.join(__dirname, "..", "workers", "sherpa-stt-worker.js");
+const WORKER_NAME = "sherpa-stt-worker.js";
+const REQUEST_TIMEOUT_MS = 25000;
+const READY_TIMEOUT_MS = 60000;
 
-let proc = null;
-let starting = null;
-let seq = 0;
-const pending = new Map();
-let lineBuf = "";
-let ctxRef = null;
-
-function setContext(ctx) {
-  ctxRef = ctx;
+function runtimePaths() {
+  const root = paths.voiceRuntimeDir();
+  return {
+    root,
+    node: path.join(root, "node.exe"),
+    modelDir: path.join(root, "models", "sensevoice-small"),
+    worker: path.join(root, WORKER_NAME),
+    modules: path.join(root, "node_modules"),
+    dllDir: path.join(root, "node_modules", "sherpa-onnx-win-x64"),
+  };
 }
 
-function handleLine(line) {
-  let msg;
-  try {
-    msg = JSON.parse(line);
-  } catch {
-    return;
+function assertRuntime() {
+  const rt = runtimePaths();
+  const model = path.join(rt.modelDir, "model.int8.onnx");
+  const tokens = path.join(rt.modelDir, "tokens.txt");
+  if (
+    !fs.existsSync(rt.node) ||
+    !fs.existsSync(rt.worker) ||
+    !fs.existsSync(model) ||
+    !fs.existsSync(tokens)
+  ) {
+    throw new Error("语音组件未随安装包提供，请重新安装桌宠。");
   }
-  if (msg.ready) {
-    if (pending.has("ready")) {
-      pending.get("ready").resolve(msg);
-      pending.delete("ready");
-    }
-    return;
-  }
-  if (msg.id != null && pending.has(msg.id)) {
-    const p = pending.get(msg.id);
-    pending.delete(msg.id);
-    if (msg.ok) p.resolve(msg);
-    else p.reject(new Error(msg.error || "stt failed"));
-  }
+  return rt;
 }
 
-function attach(child) {
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    lineBuf += chunk;
-    let idx;
-    while ((idx = lineBuf.indexOf("\n")) >= 0) {
-      const line = lineBuf.slice(0, idx).trim();
-      lineBuf = lineBuf.slice(idx + 1);
-      if (line) handleLine(line);
+function createSupervisor(options = {}) {
+  const spawnImpl = options.spawnImpl || spawn;
+  const requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+  const readyTimeoutMs = options.readyTimeoutMs ?? READY_TIMEOUT_MS;
+  let proc = null;
+  let starting = null;
+  let seq = 0;
+  const pending = new Map();
+  let lineBuf = "";
+
+  function resetSession() {
+    lineBuf = "";
+    for (const [, item] of pending) {
+      try {
+        item.reject(new Error("sherpa worker restarted"));
+      } catch (_) {}
     }
-  });
-  child.stderr.on("data", (d) => {
-    const s = d.toString();
-    if (s) console.warn("[sherpa]", s.trim().slice(0, 300));
-  });
-  child.on("exit", () => {
-    proc = null;
-    for (const [, p] of pending) p.reject(new Error("sherpa worker exited"));
     pending.clear();
-  });
-}
+  }
 
-function ensureWorker() {
-  if (proc && !proc.killed) return Promise.resolve();
-  if (starting) return starting;
-  starting = new Promise((resolve, reject) => {
-    if (!ctxRef) {
-      reject(new Error("stt context missing"));
-      return;
-    }
+  function handleLine(line) {
+    let msg;
     try {
-      deps.requireReady(ctxRef, ["node", "ffmpeg", "sherpa-onnx", "sensevoice-small"]);
-    } catch (err) {
-      reject(err);
+      msg = JSON.parse(line);
+    } catch {
       return;
     }
-    const node = deps.nodeBin(ctxRef);
-    const files = deps.senseVoiceFiles(ctxRef);
-    const child = spawn(node, [WORKER, files.dir], {
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        NODE_PATH: path.join(ctxRef.depsRoot, "node_modules"),
-      },
-      cwd: ctxRef.depsRoot,
+    if (msg.ready) {
+      if (pending.has("ready")) {
+        pending.get("ready").resolve(msg);
+        pending.delete("ready");
+      }
+      return;
+    }
+    if (msg.id != null && pending.has(msg.id)) {
+      const item = pending.get(msg.id);
+      pending.delete(msg.id);
+      if (msg.ok) item.resolve(msg);
+      else item.reject(new Error(msg.error || "stt failed"));
+    }
+  }
+
+  function attach(child) {
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      if (proc !== child) return;
+      lineBuf += chunk;
+      let idx;
+      while ((idx = lineBuf.indexOf("\n")) >= 0) {
+        const line = lineBuf.slice(0, idx).trim();
+        lineBuf = lineBuf.slice(idx + 1);
+        if (line) handleLine(line);
+      }
     });
-    proc = child;
-    attach(child);
-    const timer = setTimeout(() => {
-      pending.delete("ready");
-      reject(new Error("SenseVoice 启动超时"));
-    }, 60000);
-    pending.set("ready", {
-      resolve: (msg) => {
+    child.stderr.on("data", (data) => {
+      if (proc !== child) return;
+      const text = data.toString();
+      if (text) console.warn("[sherpa]", text.trim().slice(0, 300));
+    });
+    child.on("exit", () => {
+      if (proc !== child) return;
+      proc = null;
+      for (const [, item] of pending) item.reject(new Error("sherpa worker exited"));
+      pending.clear();
+    });
+  }
+
+  function ensureWorker() {
+    if (proc && !proc.killed) return Promise.resolve();
+    if (starting) return starting;
+    starting = new Promise((resolve, reject) => {
+      let rt;
+      try {
+        rt = options.runtime || assertRuntime();
+      } catch (err) {
+        reject(err);
+        return;
+      }
+      resetSession();
+      const pathKey = process.platform === "win32" ? "Path" : "PATH";
+      const child = spawnImpl(rt.node, [rt.worker, rt.modelDir], {
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+        cwd: rt.root,
+        env: {
+          ...process.env,
+          NODE_PATH: rt.modules,
+          [pathKey]: [rt.dllDir, rt.root, process.env[pathKey] || process.env.PATH || ""]
+            .filter(Boolean)
+            .join(path.delimiter),
+        },
+      });
+      proc = child;
+      attach(child);
+      const timer = setTimeout(() => {
+        pending.delete("ready");
+        reject(new Error("SenseVoice 启动超时"));
+      }, readyTimeoutMs);
+      pending.set("ready", {
+        resolve: (msg) => {
+          clearTimeout(timer);
+          resolve(msg);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
+      child.on("error", (err) => {
         clearTimeout(timer);
-        resolve(msg);
-      },
-      reject,
+        pending.delete("ready");
+        reject(err);
+      });
+    }).finally(() => {
+      starting = null;
     });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  }).finally(() => {
-    starting = null;
-  });
-  return starting;
-}
+    return starting;
+  }
 
-function sendRequest(obj) {
-  const id = ++seq;
-  return new Promise((resolve, reject) => {
-    if (!proc) {
-      reject(new Error("sherpa worker not running"));
-      return;
+  function shutdown() {
+    const child = proc;
+    proc = null;
+    if (child && !child.killed) {
+      try {
+        child.kill();
+      } catch (_) {}
     }
-    pending.set(id, { resolve, reject });
-    proc.stdin.write(JSON.stringify({ ...obj, id }) + "\n");
-  });
-}
+  }
 
-async function toWav16k(inputPath) {
-  const ffmpeg = deps.findFfmpeg(ctxRef || {});
-  if (!ffmpeg) throw new Error("未找到 ffmpeg，请先一键安装依赖");
-  const out = path.join(os.tmpdir(), `pet-stt-${Date.now()}.wav`);
-  await new Promise((resolve, reject) => {
-    const p = spawn(
-      ffmpeg,
-      ["-y", "-i", inputPath, "-ac", "1", "-ar", "16000", "-f", "wav", out],
-      { windowsHide: true }
-    );
-    let stderr = "";
-    p.stderr.on("data", (d) => (stderr += d.toString()));
-    p.on("error", reject);
-    p.on("close", (code) => {
-      if (code === 0) resolve();
-      else reject(new Error(stderr.slice(-800) || "ffmpeg wav failed"));
+  function sendRequest(obj) {
+    const id = ++seq;
+    return new Promise((resolve, reject) => {
+      if (!proc) {
+        reject(new Error("sherpa worker not running"));
+        return;
+      }
+      const timer = setTimeout(() => {
+        if (!pending.has(id)) return;
+        pending.delete(id);
+        reject(new Error("语音识别超时"));
+        shutdown();
+      }, requestTimeoutMs);
+      pending.set(id, {
+        resolve: (msg) => {
+          clearTimeout(timer);
+          resolve(msg);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      });
+      proc.stdin.write(JSON.stringify({ ...obj, id }) + "\n");
     });
-  });
-  return out;
+  }
+
+  function pendingCount() {
+    return pending.size;
+  }
+
+  return { ensureWorker, sendRequest, shutdown, pendingCount };
 }
 
-async function transcribeBuffer(buffer, ext = "webm") {
-  await ensureWorker();
-  // ext may arrive as a raw MIME type ("audio/webm;codecs=opus") — normalize
-  // to a bare extension or the "/" would turn the temp path into a subdir.
-  const bareExt = String(ext).toLowerCase().includes("wav") ? "wav" : "webm";
-  const raw = path.join(os.tmpdir(), `pet-rec-${Date.now()}.${bareExt}`);
-  fs.writeFileSync(raw, buffer);
-  let wav = raw;
+function tempWavPath() {
+  return path.join(
+    os.tmpdir(),
+    `pet-rec-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.wav`
+  );
+}
+
+const shared = createSupervisor();
+
+async function transcribeBuffer(buffer) {
+  await shared.ensureWorker();
+  const wav = tempWavPath();
+  fs.writeFileSync(wav, buffer);
   try {
-    if (bareExt !== "wav") wav = await toWav16k(raw);
-    const result = await sendRequest({ path: wav });
+    const result = await shared.sendRequest({ path: wav });
     return String(result.text || "").trim();
   } finally {
     try {
-      fs.unlinkSync(raw);
+      fs.unlinkSync(wav);
     } catch (_) {}
-    if (wav !== raw) {
-      try {
-        fs.unlinkSync(wav);
-      } catch (_) {}
-    }
   }
 }
 
 function warmup() {
-  return ensureWorker().catch((err) => {
+  return shared.ensureWorker().catch((err) => {
     console.warn("sherpa warmup failed", err.message);
     return null;
   });
 }
 
-function shutdown() {
-  if (proc && !proc.killed) {
-    try {
-      proc.kill();
-    } catch (_) {}
-  }
-  proc = null;
-}
-
-function defaultCtx(userData, settings) {
-  const root = paths.depsRoot(userData);
-  paths.ensureDir(root);
-  return { depsRoot: root, settings: settings || {}, onProgress: null };
-}
-
 module.exports = {
-  setContext,
   transcribeBuffer,
   warmup,
-  shutdown,
-  ensureWorker,
-  defaultCtx,
+  shutdown: () => shared.shutdown(),
+  ensureWorker: () => shared.ensureWorker(),
+  tempWavPath,
+  createSupervisor,
+  REQUEST_TIMEOUT_MS,
 };

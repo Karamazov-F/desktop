@@ -20,6 +20,7 @@ async function describeScreenshot({
   model,
   jpegBuffer,
   extraHint = "",
+  signal,
 }) {
   if (!jpegBuffer || !jpegBuffer.length) {
     throw new Error("empty screenshot");
@@ -31,6 +32,7 @@ async function describeScreenshot({
     model,
     thinking: "disabled",
     maxTokens: 240,
+    signal,
     messages: [
       {
         role: "user",

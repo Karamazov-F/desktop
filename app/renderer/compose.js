@@ -12,25 +12,47 @@ function setMicHot(on) {
 }
 
 function bindMic(btn) {
+  let voiceStartPromise = null;
   window.PetHoldTalk.bind(btn, {
     onDown() {
       window.petApi.setComposeHold?.(true);
     },
     onListen() {
-      window.petApi.voiceStart("hold").catch(console.error);
+      voiceStartPromise = window.petApi.voiceStart("hold");
+      Promise.resolve(voiceStartPromise).catch(console.error);
     },
     onSend() {
-      window.petApi.voiceStop().catch(console.error);
+      const pending = voiceStartPromise;
+      voiceStartPromise = null;
+      Promise.resolve(pending)
+        .then((res) => {
+          if (res && res.ok && res.sessionId !== undefined && res.sessionId !== null && res.sessionId !== "") {
+            return window.petApi.voiceStop(res.sessionId);
+          }
+        })
+        .catch(console.error);
     },
     onTooShort() {
-      window.petApi.voiceCancel?.().catch(console.error);
+      const pending = voiceStartPromise;
+      voiceStartPromise = null;
+      Promise.resolve(pending)
+        .then((res) => {
+          if (res && res.ok && res.sessionId !== undefined && res.sessionId !== null && res.sessionId !== "") {
+            return window.petApi.voiceCancel(res.sessionId);
+          }
+        })
+        .catch(console.error);
       window.petApi.floatText(window.PetHoldTalk.TOO_SHORT);
     },
   });
 }
 
-function setHint(text) {
-  hintEl.textContent = text || "";
+let hintSource = "other";
+function setHint(text, source = "other") {
+  const value = String(text || "");
+  hintSource = source;
+  hintEl.textContent = value;
+  window.petApi.setComposeHintText?.(value, source);
 }
 
 function expand() {
@@ -49,9 +71,13 @@ async function send() {
   syncSendReady();
   sendBtn.disabled = true;
   try {
-    await window.petApi.chat(text);
+    const res = await window.petApi.chat(text);
+    if (res?.stale) return;
+    if (res && res.fallbackNote) setHint(res.fallbackNote);
+    else if (res) setHint("");
   } catch (err) {
-    setHint(String(err.message || err));
+    console.error(err);
+    setHint(window.PetUserErrors?.NO_REPLY || "这次没能回复，请再试一次");
   } finally {
     sendBtn.disabled = false;
     inputEl.focus();
@@ -74,7 +100,11 @@ openComposeBtn.addEventListener("click", () => {
   setTimeout(() => inputEl.focus(), 0);
 });
 sendBtn.addEventListener("click", () => send().catch(console.error));
-inputEl.addEventListener("input", syncSendReady);
+inputEl.addEventListener("focus", () => window.petApi.setComposeExpanded?.(true));
+inputEl.addEventListener("input", () => {
+  syncSendReady();
+  window.petApi.setComposeExpanded?.(true);
+});
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter") send().catch(console.error);
   if (e.key === "Escape") window.petApi.windowClose?.();
@@ -86,9 +116,13 @@ bindMic(fieldMicBtn);
 // Color only while actually listening. Transcribing must not leave the
 // button hot — release already returned it to the idle look.
 window.petApi.onVoiceState?.((s) => {
-  setMicHot(s?.state === "listening");
-  if (s?.state !== "listening") setHint("");
+  window.PetVoicePresent.presentVoiceState(s, { setMicHot, setHint });
 });
 
 window.petApi.onComposeHint?.((text) => setHint(text));
+window.petApi.onComposeNote?.((payload) => {
+  document.body.classList.add("expanded");
+  if (payload?.text) setHint(payload.text, "note");
+  else if (hintSource === "note" && hintEl.textContent === payload?.expiredNote) setHint("");
+});
 

@@ -1,148 +1,14 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
   <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file: blob:; font-src 'self'; media-src 'self' blob: mediastream:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'" />
+
     <meta charset="UTF-8" />
     <title>pet</title>
+    <link rel="preload" href="./fonts/LXGWWenKai-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+
     <link rel="stylesheet" href="./fonts.css" />
-    <style>
-      html,
-      body {
-        margin: 0;
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: transparent;
-        user-select: none;
-        -webkit-app-region: no-drag;
-        scrollbar-width: none;
-      }
-      html::-webkit-scrollbar,
-      body::-webkit-scrollbar,
-      #layout::-webkit-scrollbar {
-        display: none;
-        width: 0;
-        height: 0;
-      }
-      #layout {
-        position: relative;
-        width: 100%;
-        height: 100%;
-        box-sizing: border-box;
-        overflow: hidden;
-        --stage-h: 128px;
-      }
-      #bubble {
-        display: none;
-        position: absolute;
-        left: 50%;
-        bottom: calc(40px + var(--stage-h) + 18px);
-        transform: translateX(-50%);
-        width: max-content;
-        max-width: var(--bubble-max, 240px);
-        margin: 0;
-        z-index: 4;
-        padding: 11px 15px 13px;
-        border: 1px solid rgba(111, 89, 112, 0.13);
-        border-radius: 20px 20px 20px 7px;
-        background: rgba(255, 250, 247, 0.97);
-        color: #3c353b;
-        font: 14px/1.5 var(--pet-ui-font);
-        box-shadow: 0 8px 22px rgba(53, 35, 51, 0.18), 0 2px 5px rgba(53, 35, 51, 0.08);
-        pointer-events: none;
-        -webkit-app-region: no-drag;
-        overflow: visible;
-      }
-      #bubble-text {
-        max-height: 200px;
-        overflow-y: auto;
-        word-break: break-word;
-        scrollbar-width: none;
-      }
-      #bubble.show {
-        display: block;
-      }
-      #bubble.show::after {
-        content: "";
-        position: absolute;
-        left: 50%;
-        bottom: -8px;
-        transform: translateX(-50%);
-        border: 8px solid transparent;
-        border-top-color: rgba(255, 250, 247, 0.97);
-      }
-      /* Pinned to the window bottom so a bubble growing the window upward
-         does not shove the character down the screen. */
-      #stage {
-        position: absolute;
-        left: 50%;
-        bottom: 40px;
-        transform: translateX(-50%);
-        display: flex;
-        align-items: flex-end;
-        justify-content: center;
-        -webkit-app-region: no-drag;
-      }
-      #puppet {
-        position: relative;
-        transform-origin: center bottom;
-        transition: filter 0.12s ease;
-        will-change: transform;
-      }
-      #puppet.lifted {
-        filter: drop-shadow(0 6px 5px rgba(0, 0, 0, 0.22));
-      }
-      .sprite-layer {
-        position: absolute;
-        left: 0;
-        bottom: 0;
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-        object-position: center bottom;
-        image-rendering: auto;
-        pointer-events: none;
-        opacity: 0;
-        transition: opacity 0.16s ease;
-      }
-      .sprite-layer.show {
-        opacity: 1;
-      }
-      /* Frame ticks / interrupt swaps: no opacity hole through the transparent window. */
-      .sprite-layer.snap {
-        transition: none !important;
-      }
-      #hit {
-        position: relative;
-        z-index: 2;
-        width: 100%;
-        height: 100%;
-        pointer-events: auto;
-        -webkit-app-region: no-drag;
-      }
-      #listen-dot {
-        position: absolute;
-        right: 10px;
-        bottom: 10px;
-        z-index: 3;
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #f19c86;
-        opacity: 0;
-        pointer-events: none;
-      }
-      #listen-dot.on {
-        opacity: 1;
-        animation: listening-pulse 1s ease-in-out infinite;
-      }
-      @keyframes listening-pulse { 50% { box-shadow: 0 0 0 5px rgba(241, 156, 134, 0.18); } }
-      @media (prefers-reduced-motion: reduce) {
-        .sprite-layer {
-          transition: none;
-        }
-        #listen-dot.on { animation: none; }
-      }
-    </style>
+    <link rel="stylesheet" href="./pet.css" />
   </head>
   <body>
     <div id="layout">
@@ -158,7 +24,12 @@
     </div>
     <script src="../lib/behavior.js"></script>
     <script src="../lib/pointer.js"></script>
+    <script src="../lib/user-errors.js"></script>
+    <script src="./voice-present.js"></script>
+    <script src="../lib/note-layout.js"></script>
     <script src="./floater.js"></script>
+    <script src="./mic-session.js"></script>
+    <script src="./pcm-wav.js"></script>
     <script src="./pet.js"></script>
   </body>
 </html>

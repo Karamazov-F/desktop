@@ -1,4 +1,4 @@
-const { app } = require("electron");
+const { app, safeStorage } = require("electron");
 const path = require("path");
 const paths = require("../lib/paths");
 const settingsLib = require("../lib/settings");
@@ -15,7 +15,6 @@ const state = {
   petMenuWindow: null,
   settingsWindow: null,
   tray: null,
-  setupWindow: null,
   voiceBusy: false,
   voiceHotkeyArmed: false,
   voicePhase: "idle",
@@ -24,6 +23,12 @@ const state = {
   petComposeHover: false,
   composerHover: false,
   composeHoverCloseTimer: null,
+  composeNoteHoldTimer: null,
+  composeNoteText: "",
+  composeHintText: "",
+  composeHintIsNote: false,
+  composeNoteKeepOpen: false,
+  composeNoteUntilLeave: false,
   composeExpanded: false,
   composeVoicePin: false,
   hiddenByFullscreen: false,
@@ -53,12 +58,46 @@ function packDirs() {
   return [BUNDLED_PACKS, importedDir()];
 }
 
+function keyOpts() {
+  let available = false;
+  try {
+    available = safeStorage.isEncryptionAvailable();
+  } catch (_) {
+    available = false;
+  }
+  if (!available) {
+    return {
+      encryptionAvailable: false,
+      sealKey() {
+        throw new Error("系统加密不可用，无法保存 API Key");
+      },
+      openKey() {
+        throw new Error("系统加密不可用");
+      },
+    };
+  }
+  return {
+    encryptionAvailable: true,
+    sealKey(plain) {
+      return safeStorage.encryptString(String(plain)).toString("base64");
+    },
+    openKey(enc) {
+      return safeStorage.decryptString(Buffer.from(String(enc), "base64"));
+    },
+  };
+}
+
+function presentSettings(settings) {
+  const opts = keyOpts();
+  return settingsLib.publicSettings(settings, { encryptionAvailable: opts.encryptionAvailable });
+}
+
 function loadSettings() {
-  return settingsLib.loadSettings(userData());
+  return settingsLib.loadSettings(userData(), keyOpts());
 }
 
 function saveSettings(partial) {
-  return settingsLib.saveSettings(userData(), partial);
+  return settingsLib.saveSettings(userData(), partial, keyOpts());
 }
 
 function allPacks() {
@@ -68,18 +107,6 @@ function allPacks() {
 function currentPack() {
   const settings = loadSettings();
   return findPack(packDirs(), settings.packId, { cacheDir: cacheDir() });
-}
-
-function depsCtx() {
-  const depsRoot = paths.ensureDir(paths.depsRoot(userData()));
-  return {
-    depsRoot,
-    settings: loadSettings(),
-    onProgress: (p) => {
-      const win = state.setupWindow;
-      if (win && !win.isDestroyed()) win.webContents.send("deps-progress", p);
-    },
-  };
 }
 
 function clamp(n, min, max) {
@@ -97,8 +124,8 @@ module.exports = {
   packDirs,
   loadSettings,
   saveSettings,
+  presentSettings,
   allPacks,
   currentPack,
-  depsCtx,
   clamp,
 };

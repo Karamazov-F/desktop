@@ -7,15 +7,11 @@ function chatLogPath(userData, packId) {
 }
 
 function loadChat(userData, packId) {
-  try {
-    const p = chatLogPath(userData, packId);
-    if (fs.existsSync(p)) {
-      const raw = JSON.parse(fs.readFileSync(p, "utf8"));
-      const messages = Array.isArray(raw.messages) ? raw.messages : [];
-      return messages.slice(-20);
-    }
-  } catch (_) {}
-  return [];
+  const p = chatLogPath(userData, packId);
+  if (!fs.existsSync(p)) return [];
+  const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+  if (!raw || !Array.isArray(raw.messages)) throw new Error("聊天记录格式无效");
+  return raw.messages;
 }
 
 function toText(v) {
@@ -32,17 +28,20 @@ function appendChat(userData, packId, role, text) {
   const messages = loadChat(userData, packId);
   messages.push({
     role,
-    text: toText(text).slice(0, 2000),
+    text: toText(text).slice(0, 4000),
     at: new Date().toISOString(),
   });
-  const next = messages.slice(-20);
   ensureDir(path.dirname(chatLogPath(userData, packId)));
   fs.writeFileSync(
     chatLogPath(userData, packId),
-    JSON.stringify({ messages: next }, null, 2),
+    JSON.stringify({ messages }, null, 2),
     "utf8"
   );
-  return next;
+  return messages;
 }
 
-module.exports = { loadChat, appendChat };
+function clearChat(userData, packId) {
+  fs.rmSync(chatLogPath(userData, packId), { force: true });
+}
+
+module.exports = { loadChat, appendChat, clearChat };

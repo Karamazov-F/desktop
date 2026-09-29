@@ -1,8 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
   <head>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: file: blob:; font-src 'self'; media-src 'self' blob: mediastream:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'; worker-src 'none'" />
+
     <meta charset="UTF-8" />
     <title>设置</title>
+    <link rel="preload" href="./fonts/LXGWWenKai-Regular.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+
     <link rel="stylesheet" href="./fonts.css" />
     <link rel="stylesheet" href="./ui.css" />
   </head>
@@ -16,7 +20,7 @@
     </header>
     <main>
       <h1>设置</h1>
-      <p class="hint">Key 只存在本机。文本模型不能看图；截屏走图像输入，且需手动打开。</p>
+      <p class="hint">文字会发给 DeepSeek。查看屏幕默认关闭，打开后截图才会发给视觉接口。</p>
 
       <section>
         <h2>对话</h2>
@@ -30,10 +34,8 @@
           <input id="deepseekApiKey" type="password" placeholder="sk-…" autocomplete="off" />
         </label>
         <p id="keyHint" class="hint"></p>
-        <label class="field">
-          接口
-          <input id="deepseekBaseUrl" type="text" />
-        </label>
+        <button type="button" id="clearApiKey">清除 API Key</button>
+        <p class="hint">对话发往 https://api.deepseek.com，这个地址不能改。</p>
         <div class="field-row">
           <label class="field">
             文本模型
@@ -56,9 +58,9 @@
         <label class="toggle">
           <input id="lifeStream" type="checkbox" />
           <i></i>
-          <span>自己过日子（暂时关闭：不自动切动作）</span>
+          <span>空闲时自己活动</span>
         </label>
-        <p class="hint">自动切动作先关掉，只循环待机；托盘/单击仍可手动播。左右走用同一套行走帧做水平翻转。</p>
+        <p class="hint">关闭后只循环待机。托盘和单击仍可以手动播放动作。</p>
         <label class="toggle">
           <input id="hideOnFullscreen" type="checkbox" />
           <i></i>
@@ -86,28 +88,43 @@
       </section>
 
       <section>
-        <h2>记忆</h2>
+        <h2>记忆与屏幕</h2>
         <label class="toggle">
           <input id="memoryEnabled" type="checkbox" />
           <i></i>
-          <span>长期记忆</span>
+          <span>记住对话</span>
         </label>
+        <p class="hint">默认关闭。打开后，对话摘要和你让它记住的内容保存在本机。</p>
         <label class="toggle">
           <input id="visionEnabled" type="checkbox" />
           <i></i>
-          <span>截屏感知</span>
+          <span>允许查看屏幕</span>
         </label>
+        <p class="hint">默认关闭。打开后，只有你让它看屏幕时才会截图，并在画面上提示。碎碎念不会截屏。</p>
       </section>
 
       <div class="actions">
         <button type="button" class="primary" id="save">保存</button>
-        <button type="button" id="clearMem">清空记忆</button>
+        <button type="button" id="clearMem">清空当前角色的记忆和聊天记录</button>
         <button type="button" id="importDpet">导入 .dpet</button>
         <button type="button" id="importFolder">导入文件夹</button>
-        <button type="button" id="deps">环境依赖</button>
       </div>
       <p id="status" class="status"></p>
     </main>
+    <div id="forget-modal" class="modal-back" hidden>
+      <form id="forget-card" class="modal-card">
+        <h2>清空当前角色</h2>
+        <p id="forget-pack"></p>
+        <p>会删掉当前角色的本地记忆和全部聊天记录，并清掉正在使用的对话上下文。输入 goodbye 后才能确认。</p>
+        <input id="forget-phrase" type="text" autocomplete="off" spellcheck="false" placeholder="goodbye" />
+        <p id="forget-status" class="status" role="alert"></p>
+        <div class="modal-actions">
+          <button type="button" id="forget-cancel">取消</button>
+          <button type="submit" class="primary" id="forget-confirm" disabled>确认清空</button>
+        </div>
+      </form>
+    </div>
+    <script src="../lib/user-errors.js"></script>
     <script src="../lib/hotkeys.js"></script>
     <script src="./chrome.js"></script>
     <script src="./settings.js"></script>

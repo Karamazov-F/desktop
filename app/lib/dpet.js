@@ -21,11 +21,16 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
+const { resolveInside } = require("./safe-path");
 
 const MAGIC = Buffer.from("DPET");
 const PAYLOAD_MAGIC = Buffer.from("DP01");
 const VERSION = 1;
 const INFO = Buffer.from("dpet-v1");
+const MAX_ENTRIES = 10000;
+const MAX_FILE_BYTES = 64 * 1024 * 1024;
+const MAX_OUTPUT_BYTES = 256 * 1024 * 1024;
+const COMPLETE_MARKER = ".dpet-complete";
 
 function wrapKey() {
   return crypto.createHash("sha256").update("desktop-pet-custom.dpet.v1").digest();
@@ -66,41 +71,61 @@ function encodePayload(files) {
   return Buffer.concat(parts);
 }
 
+function need(buf, off, len) {
+  if (!Number.isInteger(len) || len < 0 || off < 0 || off + len > buf.length) {
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+  }
+}
+
 function decodePayload(buf) {
   if (buf.length < 8 || buf.subarray(0, 4).toString("binary") !== PAYLOAD_MAGIC.toString("binary")) {
-    throw new Error("invalid dpet payload");
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   }
   const count = buf.readUInt32LE(4);
+  if (count > MAX_ENTRIES) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   let off = 8;
+  let total = 0;
   const files = [];
   for (let i = 0; i < count; i++) {
+    need(buf, off, 2);
     const nameLen = buf.readUInt16LE(off);
     off += 2;
+    if (nameLen > 512) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+    need(buf, off, nameLen);
     const rel = buf.subarray(off, off + nameLen).toString("utf8");
     off += nameLen;
+    need(buf, off, 4);
     const dataLen = buf.readUInt32LE(off);
     off += 4;
-    const data = buf.subarray(off, off + dataLen);
+    if (dataLen > MAX_FILE_BYTES) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+    total += dataLen;
+    if (total > MAX_OUTPUT_BYTES) throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+    need(buf, off, dataLen);
+    const data = Buffer.from(buf.subarray(off, off + dataLen));
     off += dataLen;
     files.push({ rel, data });
   }
   return files;
 }
 
-function encryptDir(dir, destPath, meta = {}) {
-  const files = collectFiles(dir);
-  if (!files.some((f) => f.rel === "pack.json")) {
-    throw new Error("pack.json missing");
+function gunzipLimited(gz, maxOutputLength = MAX_OUTPUT_BYTES) {
+  try {
+    return zlib.gunzipSync(gz, { maxOutputLength });
+  } catch (err) {
+    console.warn("gunzip", err && err.message ? err.message : err);
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   }
-  const rawJson = JSON.parse(fs.readFileSync(path.join(dir, "pack.json"), "utf8"));
+}
+
+function encryptFiles(files, destPath, meta = {}) {
   const headerObj = {
     alg: "aes-256-gcm",
     kdf: "hkdf-sha256",
     salt: "",
-    id: meta.id || rawJson.id || path.basename(dir),
-    name: meta.name || rawJson.name || rawJson.persona?.displayName || "",
-    version: meta.version || rawJson.version || "1.0.0",
-    size: rawJson.size || { width: 128, height: 128 },
+    id: meta.id || "pack",
+    name: meta.name || "",
+    version: meta.version || "1.0.0",
+    size: meta.size || { width: 128, height: 128 },
   };
   const salt = crypto.randomBytes(16);
   headerObj.salt = salt.toString("base64");
@@ -129,38 +154,82 @@ function encryptDir(dir, destPath, meta = {}) {
   return { buffer: out, header: headerObj, path: destPath };
 }
 
+function encryptDir(dir, destPath, meta = {}) {
+  const collected = collectFiles(dir);
+  if (!collected.some((f) => f.rel === "pack.json")) {
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+  }
+  const rawJson = JSON.parse(fs.readFileSync(path.join(dir, "pack.json"), "utf8"));
+  const files = collected.map((f) => ({
+    rel: f.rel,
+    data: fs.readFileSync(f.abs),
+  }));
+  return encryptFiles(files, destPath, {
+    id: meta.id || rawJson.id || path.basename(dir),
+    name: meta.name || rawJson.name || rawJson.persona?.displayName || "",
+    version: meta.version || rawJson.version || "1.0.0",
+    size: rawJson.size || { width: 128, height: 128 },
+  });
+}
+
 function parseArchive(buf) {
   if (!Buffer.isBuffer(buf)) buf = Buffer.from(buf);
   if (buf.length < 9 || buf.subarray(0, 4).toString("binary") !== MAGIC.toString("binary")) {
-    throw new Error("not a .dpet file");
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
   }
   const version = buf[4];
-  if (version !== VERSION) throw new Error(`unsupported dpet version ${version}`);
+  if (version !== VERSION) throw new Error("不支持的角色包版本，请把桌宠更新到最新版本后再导入");
   const headerLen = buf.readUInt32LE(5);
   let off = 9;
-  const header = JSON.parse(buf.subarray(off, off + headerLen).toString("utf8"));
+  let header;
+  try {
+    header = JSON.parse(buf.subarray(off, off + headerLen).toString("utf8"));
+  } catch {
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+  }
   off += headerLen;
   const iv = buf.subarray(off, off + 12);
   off += 12;
   const tag = buf.subarray(buf.length - 16);
   const ciphertext = buf.subarray(off, buf.length - 16);
-  const salt = Buffer.from(header.salt, "base64");
-  const key = deriveKey(salt);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-  decipher.setAuthTag(tag);
-  const gz = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  const payload = zlib.gunzipSync(gz);
+  let gz;
+  try {
+    const salt = Buffer.from(header.salt, "base64");
+    const key = deriveKey(salt);
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    gz = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+  } catch {
+    throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+  }
+  const payload = gunzipLimited(gz);
   const files = decodePayload(payload);
   return { header, files };
 }
 
 function decryptToDir(srcPath, destDir) {
   const parsed = parseArchive(fs.readFileSync(srcPath));
-  fs.mkdirSync(destDir, { recursive: true });
-  for (const f of parsed.files) {
-    const abs = path.join(destDir, f.rel);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, f.data);
+  const parent = path.dirname(path.resolve(destDir));
+  fs.mkdirSync(parent, { recursive: true });
+  const tmp = fs.mkdtempSync(path.join(parent, ".unpack-"));
+  try {
+    const writes = [];
+    for (const f of parsed.files) {
+      writes.push({ abs: resolveInside(tmp, f.rel), data: f.data });
+    }
+    for (const file of writes) {
+      fs.mkdirSync(path.dirname(file.abs), { recursive: true });
+      fs.writeFileSync(file.abs, file.data);
+    }
+    if (!fs.existsSync(path.join(tmp, "pack.json"))) {
+      throw new Error("这个角色包无法使用，请向角色包作者重新获取");
+    }
+    fs.writeFileSync(path.join(tmp, COMPLETE_MARKER), "1");
+    fs.rmSync(destDir, { recursive: true, force: true });
+    fs.renameSync(tmp, destDir);
+  } catch (err) {
+    fs.rmSync(tmp, { recursive: true, force: true });
+    throw err;
   }
   return { dir: destDir, header: parsed.header };
 }
@@ -171,8 +240,15 @@ function isDpetFile(filePath) {
 
 module.exports = {
   encryptDir,
+  encryptFiles,
   decryptToDir,
   parseArchive,
+  decodePayload,
+  gunzipLimited,
   isDpetFile,
   collectFiles,
+  MAX_ENTRIES,
+  MAX_FILE_BYTES,
+  MAX_OUTPUT_BYTES,
+  COMPLETE_MARKER,
 };

@@ -1,4 +1,5 @@
 const dialogue = require("./dialogue");
+const { userFacingError, annotateReply } = require("./user-errors");
 const memory = require("./memory");
 const { chatCompletionsRetry } = require("./deepseek");
 const { describeScreenshot } = require("./vision");
@@ -13,6 +14,9 @@ const {
 } = require("./tools");
 
 const sessions = new Map();
+const sessionVersions = new Map();
+const MAX_ROUNDS = 5;
+const MAX_TURN_MS = 60000;
 
 function sessionKey(packId) {
   return String(packId || "default");
@@ -53,16 +57,38 @@ function buildSystemPrompt(pack, settings, mem) {
   }
   if (settings.visionEnabled) {
     parts.push(
-      "截屏感知已开启：用户问屏幕上是什么、在忙什么时，先 glance_screen 再回答。描述保持笼统。"
+      "允许查看屏幕已开启：用户问屏幕上是什么、在忙什么时，先 glance_screen 再回答。描述保持笼统。"
     );
   } else {
-    parts.push("截屏感知关闭。若用户要你看屏幕，说明需要先在托盘打开「截屏感知」。");
+    parts.push("查看屏幕已关闭。若用户要你看屏幕，说明需要先在设置里打开「允许查看屏幕」。");
   }
   return parts.join("\n");
 }
 
 function localFallback(pack, userText) {
   return dialogue.reply(pack, userText);
+}
+
+function clearSessions() {
+  sessions.clear();
+}
+
+function clearSession(packId) {
+  const key = sessionKey(packId);
+  sessions.delete(key);
+  sessionVersions.set(key, sessionVersion(packId) + 1);
+}
+
+function sessionVersion(packId) {
+  return sessionVersions.get(sessionKey(packId)) || 0;
+}
+
+function isSessionCurrent(packId, version) {
+  return sessionVersion(packId) === version;
+}
+
+function visionIsOn(settings, allowVision = true) {
+  return Boolean(settings?.visionEnabled && allowVision);
 }
 
 async function runAgentTurn({
@@ -73,14 +99,18 @@ async function runAgentTurn({
   captureScreen,
   applyPlay,
   applyMove,
+  allowVision = true,
+  notifyCapture,
+  signal,
 }) {
+  const version = sessionVersion(pack.id);
   const displayName = pack.persona?.displayName || pack.name || "桌宠";
   const local = localFallback(pack, userText);
 
   if (!settings.deepseekEnabled || !settings.deepseekApiKey) {
     if (local.action || local.move) applyPlay?.(local.action, local.text, local.move || null);
     else if (local.text) applyPlay?.(null, local.text);
-    return {
+    const reply = {
       text: local.text,
       action: local.action,
       matched: local.matched,
@@ -88,20 +118,41 @@ async function runAgentTurn({
       source: "local",
       displayName,
     };
+    if (settings.deepseekEnabled && !settings.deepseekApiKey) {
+      reply.reason = settings.deepseekApiKeyEnc ? "unreadable-key" : "missing-key";
+    }
+    return annotateReply(reply);
   }
 
+  const visionOn = visionIsOn(settings, allowVision);
+  const effective = { ...settings, visionEnabled: visionOn };
   const mem = settings.memoryEnabled
     ? memory.loadMemory(userData, pack.id)
     : memory.emptyMemory();
   const actions = availableActions(pack);
   const tools = toolDefs({
     memoryEnabled: settings.memoryEnabled,
-    visionEnabled: settings.visionEnabled,
+    visionEnabled: visionOn,
     actions,
   });
-  const allowed = allowedToolNames(settings);
+  const allowed = allowedToolNames(effective);
+  const turn = new AbortController();
+  const ensureActive = () => {
+    if (turn.signal.aborted || !isSessionCurrent(pack.id, version)) {
+      const err = new Error("agent turn cancelled");
+      err.name = "AbortError";
+      throw err;
+    }
+  };
+  const onParentAbort = () => turn.abort();
+  if (signal) {
+    if (signal.aborted) turn.abort();
+    else signal.addEventListener("abort", onParentAbort);
+  }
+  const kill = setTimeout(() => turn.abort(), MAX_TURN_MS);
+  const started = Date.now();
   const messages = [
-    { role: "system", content: buildSystemPrompt(pack, settings, mem) },
+    { role: "system", content: buildSystemPrompt(pack, effective, mem) },
     ...getHistory(pack.id),
     { role: "user", content: String(userText || "").slice(0, 2000) },
   ];
@@ -114,7 +165,11 @@ async function runAgentTurn({
   let pendingMove = null;
 
   try {
-    for (let round = 0; round < 5; round++) {
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      ensureActive();
+      if (Date.now() - started > MAX_TURN_MS) {
+        throw new Error("思考时间过长");
+      }
       const result = await chatCompletionsRetry({
         apiKey: settings.deepseekApiKey,
         baseUrl: settings.deepseekBaseUrl,
@@ -124,7 +179,9 @@ async function runAgentTurn({
         temperature: 0.8,
         maxTokens: 400,
         thinking: "disabled",
+        signal: turn.signal,
       });
+      ensureActive();
 
       if (result.tool_calls && result.tool_calls.length) {
         messages.push({
@@ -133,6 +190,7 @@ async function runAgentTurn({
           tool_calls: result.tool_calls,
         });
         for (const call of result.tool_calls) {
+          ensureActive();
           const name = normalizeToolName(call.function?.name || call.name);
           const args = parseToolArgs(call.function?.arguments || call.arguments);
           const id = call.id || `call_${round}_${name}`;
@@ -161,18 +219,28 @@ async function runAgentTurn({
             memory.forgetFacts(userData, pack.id, args.query);
             toolResult = "forgotten";
           } else if (name === "glance_screen") {
-            if (!captureScreen) toolResult = "capture unavailable";
-            else {
-              const jpeg = await captureScreen();
-              const desc = await describeScreenshot({
-                apiKey: settings.deepseekApiKey,
-                baseUrl: settings.deepseekBaseUrl,
-                model: settings.visionModel || settings.deepseekModel || "deepseek-flash",
-                jpegBuffer: jpeg,
-                extraHint: userText,
-              });
-              usedVision = true;
-              toolResult = desc || "看不太清";
+            if (!visionOn || typeof captureScreen !== "function") {
+              toolResult = "查看屏幕未开启";
+            } else {
+              if (notifyCapture) await notifyCapture(true);
+              try {
+                ensureActive();
+                const jpeg = await captureScreen();
+                ensureActive();
+                const desc = await describeScreenshot({
+                  apiKey: settings.deepseekApiKey,
+                  baseUrl: settings.deepseekBaseUrl,
+                  model: settings.visionModel || settings.deepseekModel || "deepseek-flash",
+                  jpegBuffer: jpeg,
+                  extraHint: userText,
+                  signal: turn.signal,
+                });
+                ensureActive();
+                usedVision = true;
+                toolResult = desc || "看不太清";
+              } finally {
+                if (notifyCapture) await notifyCapture(false);
+              }
             }
           }
           messages.push({
@@ -187,23 +255,30 @@ async function runAgentTurn({
       lastText = String(result.content || "").trim();
       break;
     }
+    ensureActive();
   } catch (err) {
+    if (!isSessionCurrent(pack.id, version)) return { text: "", stale: true };
+    console.warn("agent turn failed", err && err.stack ? err.stack : err);
     source = "local-fallback";
     lastText = local.text;
     lastAction = local.action;
     if (local.action || local.move) applyPlay?.(local.action, local.text, local.move || null);
     else applyPlay?.(null, local.text);
-    return {
+    return annotateReply({
       text: lastText,
       action: lastAction,
       matched: local.matched,
       move: local.move || null,
       source,
-      error: String(err.message || err).slice(0, 240),
+      error: userFacingError(err),
       displayName,
-    };
+    });
+  } finally {
+    clearTimeout(kill);
+    if (signal) signal.removeEventListener("abort", onParentAbort);
   }
 
+  if (!isSessionCurrent(pack.id, version)) return { text: "", stale: true };
   if (!lastText) lastText = local.text || "嗯。";
   if (didMove) {
     applyPlay?.(null, lastText);
@@ -226,7 +301,7 @@ async function runAgentTurn({
     memory.saveMemory(userData, pack.id, m);
   }
 
-  return {
+  return annotateReply({
     text: lastText,
     action: lastAction || (didMove || local.move ? local.action || "walk" : null),
     matched: true,
@@ -234,12 +309,19 @@ async function runAgentTurn({
     source,
     usedVision,
     displayName,
-  };
+  });
 }
 
 module.exports = {
   runAgentTurn,
   getHistory,
   pushHistory,
+  clearSessions,
+  clearSession,
+  sessionVersion,
+  isSessionCurrent,
   buildSystemPrompt,
+  MAX_ROUNDS,
+  MAX_TURN_MS,
+  visionIsOn,
 };

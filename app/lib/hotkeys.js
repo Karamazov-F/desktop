@@ -128,7 +128,7 @@ function fromKeyboardEvent(e) {
   return [...MOD_ORDER.filter((m) => mods.has(m)), key].join("+");
 }
 
-const api = {
+const petHotkeysApi = {
   DEFAULTS,
   normalize,
   formatDisplay,
@@ -138,7 +138,7 @@ const api = {
 };
 
 if (typeof module === "object" && module.exports) {
-  module.exports = api;
+  module.exports = petHotkeysApi;
 } else if (typeof window !== "undefined") {
-  window.PetHotkeys = api;
+  window.PetHotkeys = petHotkeysApi;
 }

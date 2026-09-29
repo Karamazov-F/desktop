@@ -1,5 +1,7 @@
 const { BrowserWindow, screen, desktopCapturer } = require("electron");
 const { state, BUBBLE_SLOT, appFile, loadSettings, currentPack, clamp } = require("./state");
+const { browserWebPreferences, hardenWindow } = require("./window-guard");
+const captureNotice = require("./capture-notice");
 
 function rememberPetOuterSize() {
   if (!state.petWindow || state.petWindow.isDestroyed()) return;
@@ -53,6 +55,12 @@ function resizePetToPack(pack, opts = {}) {
   require("./compose").positionComposeBesidePet();
 }
 
+function floatText(text) {
+  const label = String(text || "").trim();
+  if (!label || !state.petWindow || state.petWindow.isDestroyed()) return;
+  state.petWindow.webContents.send("float-text", label);
+}
+
 function sendPlay(action, line, move) {
   if (!state.petWindow || state.petWindow.isDestroyed()) return;
   if (!action && !line && !move) return;
@@ -81,24 +89,36 @@ function movePet(direction, distance) {
   sendPlay(walk, null, { direction, distance: distance || 220 });
 }
 
-async function capturePrimaryJpeg() {
+async function capturePrimaryJpeg({ signal } = {}) {
+  const ensureActive = () => {
+    if (signal?.aborted) {
+      const err = new Error("voice session cancelled");
+      err.name = "AbortError";
+      throw err;
+    }
+  };
+  ensureActive();
   const display = screen.getPrimaryDisplay();
   const size = display.size;
   const thumbW = Math.min(1280, size.width);
   const thumbH = Math.min(720, size.height);
   const hidden = state.petWindow && !state.petWindow.isDestroyed() && state.petWindow.isVisible();
   if (hidden) state.petWindow.hide();
+  captureNotice.concealForGrab();
   await new Promise((r) => setTimeout(r, 80));
   try {
+    ensureActive();
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
       thumbnailSize: { width: thumbW, height: thumbH },
     });
+    ensureActive();
     const match =
       sources.find((s) => String(s.display_id) === String(display.id)) || sources[0];
     if (!match) throw new Error("no screen source");
     return match.thumbnail.toJPEG(70);
   } finally {
+    captureNotice.restoreAfterGrab();
     if (hidden && state.petWindow && !state.petWindow.isDestroyed()) {
       state.petWindow.showInactive();
     }
@@ -122,12 +142,9 @@ function createPetWindow() {
     skipTaskbar: true,
     alwaysOnTop: settings.alwaysOnTop,
     hasShadow: false,
-    webPreferences: {
-      preload: appFile("preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+    webPreferences: browserWebPreferences(),
   });
+  hardenWindow(state.petWindow);
 
   state.petWindow.setAlwaysOnTop(settings.alwaysOnTop, "screen-saver");
   state.petWindow.loadFile(appFile("renderer", "index.html"));
@@ -168,6 +185,7 @@ module.exports = {
   petBox,
   packWindowSize,
   resizePetToPack,
+  floatText,
   sendPlay,
   sendFacing,
   setPetPassthrough,

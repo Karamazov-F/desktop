@@ -11,7 +11,7 @@
   --ok: #b9d8b1;
   --bad: #ffafa5;
   --titlebar: 42px;
-  --font: var(--pet-ui-font, "乐米石朗体", "Microsoft YaHei UI", sans-serif);
+  --font: var(--pet-ui-font, "LXGW WenKai", "Microsoft YaHei", "Segoe UI Emoji", system-ui, sans-serif);
 }
 
 html {
@@ -337,67 +337,6 @@ button:disabled {
   color: var(--ok);
 }
 
-#list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.item {
-  padding: 11px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.065);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.035);
-}
-
-.item:last-child {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.065);
-}
-
-.item-top {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.item .name {
-  font-weight: 500;
-  flex: 1;
-}
-
-.item .tag {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
-.item.ok .tag {
-  color: var(--ok);
-}
-
-.item.bad .tag {
-  color: var(--bad);
-}
-
-.item .meta {
-  color: var(--muted);
-  font-size: 12px;
-  margin-top: 4px;
-}
-
-#log:not(.chat) {
-  margin-top: 16px;
-  min-height: 52px;
-  color: var(--muted);
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-
-code {
-  font-family: ui-monospace, Consolas, monospace;
-  font-size: 0.92em;
-}
-
 #wrap {
   display: flex;
   flex-direction: column;
@@ -492,3 +431,41 @@ code {
 #send:hover { background: #ffe5d4; color: #3a292b; }
 @keyframes breathe { 50% { box-shadow: 0 0 0 4px rgba(255, 175, 165, 0.16); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+.modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 12, 16, 0.62);
+}
+
+.modal-back[hidden] { display: none; }
+
+.modal-card {
+  width: min(360px, 100%);
+  margin: 0;
+  padding: 18px 18px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: radial-gradient(circle at 100% 0%, rgba(255, 211, 184, 0.16), transparent 42%), var(--bg-raised);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+}
+
+.modal-card h2 { margin: 0 0 8px; font-size: 16px; font-weight: 500; }
+.modal-card p { margin: 0 0 12px; color: var(--muted); }
+#forget-status { margin: 0 0 10px; color: var(--bad); }
+.modal-card input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--fg);
+  font: inherit;
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }

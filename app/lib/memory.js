@@ -7,32 +7,40 @@ function packMemoryPath(userData, packId) {
 }
 
 function emptyMemory() {
-  return { facts: [], summary: "", updatedAt: null };
+  return { facts: [], rounds: [], summary: "", updatedAt: null };
 }
 
 function loadMemory(userData, packId) {
   const p = packMemoryPath(userData, packId);
-  try {
-    if (fs.existsSync(p)) {
-      const raw = JSON.parse(fs.readFileSync(p, "utf8"));
-      return {
-        facts: Array.isArray(raw.facts) ? raw.facts.map(String).filter(Boolean) : [],
-        summary: typeof raw.summary === "string" ? raw.summary : "",
-        updatedAt: raw.updatedAt || null,
-      };
-    }
-  } catch (_) {}
-  return emptyMemory();
+  if (!fs.existsSync(p)) return emptyMemory();
+  const raw = JSON.parse(fs.readFileSync(p, "utf8"));
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("记忆格式无效");
+  if ((raw.facts != null && !Array.isArray(raw.facts)) ||
+      (raw.rounds != null && !Array.isArray(raw.rounds)) ||
+      (raw.summary != null && typeof raw.summary !== "string")) {
+    throw new Error("记忆格式无效");
+  }
+  return {
+    ...raw,
+    facts: Array.isArray(raw.facts) ? raw.facts.map(String).filter(Boolean) : [],
+    rounds: Array.isArray(raw.rounds) ? raw.rounds : [],
+    summary: typeof raw.summary === "string" ? raw.summary : "",
+    updatedAt: raw.updatedAt || null,
+  };
 }
 
 function saveMemory(userData, packId, mem) {
+  const file = packMemoryPath(userData, packId);
+  if (fs.existsSync(file)) loadMemory(userData, packId);
   ensureDir(memoryDir(userData));
   const next = {
-    facts: (mem.facts || []).map((f) => String(f).trim()).filter(Boolean).slice(0, 80),
-    summary: String(mem.summary || "").slice(0, 1200),
+    ...mem,
+    facts: (mem.facts || []).map((f) => String(f).trim()).filter(Boolean),
+    rounds: Array.isArray(mem.rounds) ? mem.rounds : [],
+    summary: String(mem.summary || ""),
     updatedAt: new Date().toISOString(),
   };
-  fs.writeFileSync(packMemoryPath(userData, packId), JSON.stringify(next, null, 2), "utf8");
+  fs.writeFileSync(file, JSON.stringify(next, null, 2), "utf8");
   return next;
 }
 
